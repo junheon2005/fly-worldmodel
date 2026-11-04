@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>World Model Port Test</title>
+  <style>
+    :root { --bg: #0f1115; --text: #e6e8ee; --muted: #8a91a2; --ok: #4cc46a; --bad: #e05050; }
+    body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+    h1 { font-size: 18px; }
+    pre { background: #171a21; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
+    .ok { color: var(--ok); } .bad { color: var(--bad); }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+</head>
+<body>
+  <h1>World model in the browser — port test</h1>
+  <pre id="log">loading…</pre>
+  <script type="module">
+    import { WorldModel } from "./sim/worldmodel.js";
+    import { FlyBrain } from "./sim/brain.js";
+    const lines = [];
+    const log = (s) => { lines.push(s); document.getElementById("log").textContent = lines.join("\n"); };
+
+    const t0 = performance.now();
+    const [wm, brain] = await Promise.all([WorldModel.load("data/"), FlyBrain.load("data/")]);
+    log(`loaded world model (3 ONNX parts) + brain in ${(performance.now() - t0).toFixed(0)} ms`);
+
+    // 1) Python 기준값과 비교 (z는 가장 확률 높은 칸으로 고정)
+    const ref = await fetch("data/wm_test.json").then((r) => r.json());
+    wm.sample = false;
+    wm.reset();
+    const diff = { h: 0, post: 0, recon: 0, reward: 0, cont: 0, value: 0 };
+    const upd = (k, a, b) => { diff[k] = Math.max(diff[k], Math.abs(a - b)); };
+    for (let t = 0; t < ref.obs.length; t++) {
+      const r = await wm.observe(ref.obs[t]);
+      ref.h_sample[t].forEach((x, i) => upd("h", x, r.h[i]));
+      ref.post[t].forEach((x, i) => upd("post", x, r.postProbs[i]));
+      ref.recon[t].forEach((x, i) => upd("recon", x, r.recon[i]));
+      upd("reward", ref.reward[t], r.reward); upd("cont", ref.cont[t], r.cont); upd("value", ref.value[t], r.value);
+      wm.setAction(ref.action[t]);
+    }
+    // 상상 비교: 고정 행동으로 img_step 10번
+    let h = wm.h, z = wm.z, imagDiff = 0;
+    for (let k = 0; k < ref.imag_reward.length; k++) {
+      const r = await wm.imgStep.run({ h: wm.tensor(h, [1, 256]), z: wm.tensor(z, [1, 256]), action: wm.tensor(ref.imag_action, [1, 3]) });
+      h = r.h_out.data.slice(); z = wm.pickZ(r.prior.data);
+      imagDiff = Math.max(imagDiff, Math.abs((await wm.readHeads(h, z)).reward - ref.imag_reward[k]));
+    }
+    // 행동 지도(what-if): 후보 28개를 배치로 4스텝 상상 (wm.h, z는 마지막 실제 상태 그대로)
+    const q = await wm.whatIf(ref.whatif_actions, ref.whatif_steps);
+    const whatifDiff = Math.max(...ref.whatif.map((x, i) => Math.abs(x - q[i])));
+    const pass = Object.values(diff).every((d) => d < 1e-3) && imagDiff < 1e-3 && whatifDiff < 1e-3;
+    log(`\nmatch vs Python over ${ref.obs.length} real steps + 10 imagined steps + what-if (${q.length} actions):`);
+    for (const [k, d] of Object.entries(diff)) log(`  max |${k} diff| ${d.toExponential(2)}`);
+    log(`  max |imagined reward diff| ${imagDiff.toExponential(2)}`);
+    log(`  max |what-if Q diff| ${whatifDiff.toExponential(2)}`);
+    log(pass ? "  → MATCH" : "  → MISMATCH");
+    document.getElementById("log").classList.add(pass ? "ok" : "bad");
+
+    // 2) 속도: 실제 1스텝(observe) / 상상 15스텝(뇌 포함)
+    const obs = ref.obs[5];
+    let t1 = performance.now();
+    for (let i = 0; i < 50; i++) await wm.observe(obs);
+    const obsMs = (performance.now() - t1) / 50;
+    t1 = performance.now();
+    for (let i = 0; i < 5; i++) await wm.imagine(brain, 15);
+    const imagMs = (performance.now() - t1) / 5;
+    t1 = performance.now();
+    for (let i = 0; i < 20; i++) await wm.whatIf(ref.whatif_actions, ref.whatif_steps);
+    const whatifMs = (performance.now() - t1) / 20;
+    log(`\nspeed: observe ${obsMs.toFixed(1)} ms/step · imagine 15 steps (world model + brain) ${imagMs.toFixed(0)} ms` +
+        ` · what-if ${ref.whatif_actions.length} actions × ${ref.whatif_steps} steps ${whatifMs.toFixed(1)} ms`);
+    window.__wm = { pass, obsMs, imagMs, whatifMs };
+  </script>
+</body>
+</html>

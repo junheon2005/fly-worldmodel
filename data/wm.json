@@ -1,0 +1,1 @@
+{"deter": 256, "stoch": 256, "groups": 16, "classes": 16, "obs_dim": 36, "act_dim": 3}

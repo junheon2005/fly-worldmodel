@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Brain Port Test</title>
+  <style>
+    :root { --bg: #0f1115; --text: #e6e8ee; --muted: #8a91a2; --ok: #4cc46a; --bad: #e05050; }
+    body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+    h1 { font-size: 18px; }
+    pre { background: #171a21; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
+    .ok { color: var(--ok); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <h1>Connectome brain in the browser — port test</h1>
+  <p class="muted">Compares the JavaScript brain with the Python reference, then measures speed.</p>
+  <pre id="log">loading…</pre>
+  <script type="module">
+    import { FlyBrain } from "./sim/brain.js";
+    const log = (s) => { document.getElementById("log").textContent += "\n" + s; };
+    document.getElementById("log").textContent = "";
+
+    const t0 = performance.now();
+    const brain = await FlyBrain.load("data/");
+    log(`loaded: ${brain.n.toLocaleString()} neurons, ${brain.col.length.toLocaleString()} connections in ${(performance.now() - t0).toFixed(0)} ms`);
+
+    // 1) Python 기준 결과와 비교
+    const ref = await fetch("data/brain_test.json").then((r) => r.json());
+    brain.reset();
+    brain.gfJump = false;          // 반사 점프 끔 = Python 뇌와 같은 행동 규칙
+    let maxOut = 0, maxAct = 0, maxRate = 0, maxMean = 0, jumpMismatch = 0;
+    ref.obs.forEach((obs, t) => {
+      const { out, rate } = brain.step(obs);
+      ref.out[t].forEach((o, a) => { maxOut = Math.max(maxOut, Math.abs(o - out[a])); });
+      // 최종 행동값: Python은 tanh(출력), 브라우저는 action(). 점프 발동(0.5 초과) 여부도 비교
+      const act = brain.action();
+      ref.out[t].forEach((o, a) => { maxAct = Math.max(maxAct, Math.abs(Math.tanh(o) - act[a])); });
+      if ((Math.tanh(ref.out[t][2]) > 0.5) !== (act[2] > 0.5)) jumpMismatch++;
+      ref.rate_sample_idx.forEach((idx, k) => { maxRate = Math.max(maxRate, Math.abs(ref.rate_sample[t][k] - rate[idx])); });
+      let m = 0; for (let i = 0; i < brain.n; i++) m += rate[i];
+      maxMean = Math.max(maxMean, Math.abs(m / brain.n - ref.rate_mean[t]));
+    });
+    const pass = maxOut < 1e-3 && maxAct < 1e-3 && maxRate < 1e-3 && jumpMismatch === 0;
+    log(`\nmatch vs Python over ${ref.obs.length} steps:`);
+    log(`  max |raw output diff|     ${maxOut.toExponential(2)}`);
+    log(`  max |final action diff|   ${maxAct.toExponential(2)}  (reflex jump off)`);
+    log(`  jump trigger mismatches   ${jumpMismatch}`);
+    log(`  max |neuron rate diff|    ${maxRate.toExponential(2)}  (200 sampled neurons)`);
+    log(`  max |mean rate diff|      ${maxMean.toExponential(2)}`);
+    log(pass ? "  → MATCH" : "  → MISMATCH");
+    document.getElementById("log").classList.add(pass ? "ok" : "bad");
+
+    // 2) 속도
+    const obs = ref.obs[10];
+    for (let i = 0; i < 20; i++) brain.step(obs);   // 워밍업
+    const N = 300, t1 = performance.now();
+    for (let i = 0; i < N; i++) brain.step(obs);
+    const ms = (performance.now() - t1) / N;
+    log(`\nspeed: ${ms.toFixed(2)} ms per game step  →  ${(1000 / ms).toFixed(0)} steps/s possible (target 20)`);
+    window.__result = { pass, maxOut, maxRate, ms };
+  </script>
+</body>
+</html>

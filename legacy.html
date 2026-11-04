@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fly World Model</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="importmap">
+    { "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    } }
+  </script>
+</head>
+<body>
+  <div class="legacy-banner">
+    Legacy server mode — this view does not follow the current time-base convention and lacks newer features.
+    Use the browser version: <code>python serve_web.py</code> → <a href="http://localhost:8002/app.html">http://localhost:8002/app.html</a>
+  </div>
+  <header>
+    <h1>Fly World Model</h1>
+    <div class="controls">
+      <div class="seg" id="mode">
+        <button data-mode="brain" class="on">Connectome brain</button>
+        <button data-mode="rule">Rule-based</button>
+        <button data-mode="human">Keyboard</button>
+      </div>
+      <button id="pause">Pause</button>
+      <button id="reset">Reset</button>
+      <label>Level <select id="level">
+        <option value="0">0 · no predator</option><option value="1">1 · slow predator</option>
+        <option value="2">2 · full predator</option>
+      </select></label>
+      <label>Speed <select id="speed">
+        <option value="0.5">0.5×</option><option value="1" selected>1×</option>
+        <option value="2">2×</option><option value="4">4×</option>
+      </select></label>
+      <span id="status" class="muted">Connecting…</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- 왼쪽: 뇌 -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Fly brain activity</h2>
+        <span class="muted" id="brain-info"></span>
+      </div>
+      <div id="brain-view"><div id="tooltip"></div></div>
+      <div class="legend" id="legend"></div>
+      <h3>Descending neurons (motor output)</h3>
+      <div id="dn-bars" class="bars"></div>
+      <h3>Sensory neuron groups (mean rate)</h3>
+      <div id="in-bars" class="bars"></div>
+    </section>
+
+    <!-- 가운데: 월드모델 -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>World model state · outputs</h2>
+      </div>
+      <h3>Sensory input (observation to brain &amp; world model)</h3>
+      <div class="sense">
+        <div class="sense-row"><span>Food odor</span><div class="lr" id="o-food"></div></div>
+        <div class="sense-row"><span>CO₂</span><div class="lr" id="o-co2"></div></div>
+        <div class="sense-row"><span>Left / right eye</span><canvas id="eyes" height="18"></canvas></div>
+      </div>
+      <h3>Action</h3>
+      <div id="act-bars" class="bars"></div>
+      <h3>Reward <span class="muted" id="reward-num"></span></h3>
+      <canvas id="reward-chart" height="120"></canvas>
+
+      <div class="wm-block" id="wm">
+        <h3>Decoded by world model (what it thinks the fly senses)</h3>
+        <div class="sense">
+          <div class="sense-row"><span>Food odor</span><div class="lr" id="r-food"></div></div>
+          <div class="sense-row"><span>CO₂</span><div class="lr" id="r-co2"></div></div>
+          <div class="sense-row"><span>Left / right eye</span><canvas id="eyes-r" height="18"></canvas></div>
+        </div>
+        <h3>Deterministic state h (time × dim)</h3>
+        <canvas id="h-heat" height="90"></canvas>
+        <h3>Stochastic state z</h3>
+        <canvas id="z-grid" height="120"></canvas>
+        <h3>Predicted vs actual reward · value <span class="muted" id="wm-num"></span></h3>
+        <canvas id="pred-chart" height="120"></canvas>
+        <div class="legend">
+          <span><i style="background:var(--muted)"></i>actual reward</span>
+          <span><i style="background:var(--accent)"></i>predicted reward</span>
+          <span><i style="background:var(--loom)"></i>value</span>
+          <span>right of the line: imagined next 15 steps</span>
+        </div>
+        <div class="wm-empty" id="wm-empty">World model not trained yet</div>
+      </div>
+    </section>
+
+    <!-- 오른쪽: 게임 -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Game</h2>
+        <span class="muted" id="game-info"></span>
+      </div>
+      <img id="game" alt="game frame">
+      <div class="stats">
+        <div><b id="score">0</b><span>Food</span></div>
+        <div><b id="total">0</b><span>Return</span></div>
+        <div><b id="step">0</b><span>Step</span></div>
+        <div><b id="episode">1</b><span>Episode</span></div>
+      </div>
+      <p class="muted hint" id="hint">Keyboard: ↑↓ forward/back, ←→ turn, Space jump</p>
+      <h3>Events</h3>
+      <ul id="events"></ul>
+    </section>
+  </main>
+
+  <script type="module" src="/static/main.js"></script>
+</body>
+</html>

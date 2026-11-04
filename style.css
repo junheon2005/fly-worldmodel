@@ -1,0 +1,165 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --line: #262b36;
+  --text: #e6e8ee;
+  --muted: #8a91a2;
+  --accent: #f0c850;
+  --food: #4cc46a;
+  --co2: #c8c040;
+  --loom: #4a90e2;
+  --dn: #f08a3c;
+  --bad: #e05050;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+h1 { font-size: 16px; margin: 0; }
+h2 { font-size: 14px; margin: 0; }
+h3 { font-size: 12px; margin: 12px 0 6px; color: var(--muted); font-weight: 600; }
+.muted { color: var(--muted); }
+.controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+button, select {
+  background: #222734;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { border-color: #3a4152; }
+.seg { display: flex; }
+.seg button { border-radius: 0; }
+.seg button:first-child { border-radius: 6px 0 0 6px; }
+.seg button:last-child { border-radius: 0 6px 6px 0; }
+.seg button.on { background: var(--accent); color: #111; border-color: var(--accent); }
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  background: var(--line);
+  min-height: 0;
+}
+.panel {
+  background: var(--panel);
+  padding: 12px 16px;
+  overflow-y: auto;
+  min-width: 0;
+}
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+
+#brain-view {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #0b0d11;
+  border-radius: 8px;
+  overflow: hidden;
+}
+#brain-view canvas { display: block; }
+#tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(0, 0, 0, .8);
+  padding: 3px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+  display: none;
+  z-index: 2;
+}
+.legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+
+.bars { display: grid; grid-template-columns: auto 1fr 40px; gap: 3px 8px; align-items: center; font-size: 12px; }
+.bars .track { height: 10px; background: #0b0d11; border-radius: 3px; position: relative; overflow: hidden; }
+.bars .fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 3px; }
+.bars .fill.center { left: 50%; }
+.bars .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+.sense { display: grid; gap: 6px; }
+.sense-row { display: grid; grid-template-columns: 90px 1fr; align-items: center; font-size: 12px; }
+.lr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.lr .track { height: 12px; background: #0b0d11; border-radius: 3px; position: relative; overflow: hidden; }
+.lr .fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+canvas { width: 100%; display: block; }
+
+.wm-block { position: relative; margin-top: 4px; }
+.wm-empty {
+  position: absolute;
+  inset: 28px 0 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(23, 26, 33, .82);
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+
+#game { width: 100%; border-radius: 8px; background: #0b0d11; aspect-ratio: 1; display: block; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+.stats div { background: #0b0d11; border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; }
+.stats b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.stats span { font-size: 11px; color: var(--muted); }
+.hint { margin: 8px 0 0; display: none; }
+#events { list-style: none; margin: 0; padding: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+#events li { padding: 2px 0; border-bottom: 1px solid var(--line); }
+#events .food { color: var(--food); }
+#events .escaped { color: var(--loom); }
+#events .caught { color: var(--bad); }
+
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; }
+  body { height: auto; }
+}
+
+/* 뇌 보기 전환 · 뉴런 조작 (app.html) */
+.brain-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+.seg.small button { padding: 2px 8px; font-size: 12px; }
+.ctl { display: grid; gap: 6px; font-size: 12px; }
+.ctl button { padding: 2px 8px; font-size: 12px; }
+.ctl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.group-ctl { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 6px; align-items: center; }
+.group-ctl i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+button.stim.on { background: #8cf2ff; color: #111; border-color: #8cf2ff; }
+button.sil.on { background: #9a4de6; color: #fff; border-color: #9a4de6; }
+.ghost-toggle { display: block; margin-top: 8px; font-size: 12px; }
+.ghost-key { display: inline-block; width: 18px; border-top: 2px dashed rgb(140,220,255); vertical-align: middle; margin: 0 4px; }
+
+/* 가운데 패널: 상태 지도 · 접기 */
+#state-map { border-radius: 8px; background: #0b0d11; }
+#timeline { border-radius: 8px; background: #0b0d11; }
+#action-map { border-radius: 8px; background: #0b0d11; }
+.act-num { margin-top: 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.act-note { font-size: 11px; }
+/* 접었다 펴는 영역 (뉴런 조작) */
+details.fold { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 6px; }
+details.fold summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; }
+details.fold[open] summary { margin-bottom: 6px; }
+.clamp-info { margin-left: 6px; color: rgb(140,220,255); font-weight: 400; }
+.lr .tick { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #fff; border-radius: 1px; }
+.reflex { display: block; font-size: 12px; line-height: 1.5; margin-top: 4px; }
+.reflex input { vertical-align: -2px; margin-right: 4px; }
+.legacy-banner { background: #3a2a10; color: #f0c850; font-size: 12px; padding: 6px 16px; border-bottom: 1px solid #5a4318; }
+.legacy-banner code { background: rgba(0,0,0,.3); padding: 0 4px; border-radius: 3px; }
+.legacy-banner a { color: #ffd979; }

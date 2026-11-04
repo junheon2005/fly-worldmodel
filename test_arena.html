@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arena Port Test</title>
+  <style>
+    :root { --bg: #0f1115; --panel: #171a21; --text: #e6e8ee; --muted: #8a91a2; --ok: #4cc46a; --bad: #e05050; --accent: #f0c850; }
+    body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    h2 { font-size: 15px; margin: 16px 0 8px; }
+    .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+    pre { background: var(--panel); padding: 12px; border-radius: 8px; white-space: pre-wrap; margin: 0; flex: 1; min-width: 280px; }
+    .ok { color: var(--ok); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+    canvas { width: min(480px, 100%); aspect-ratio: 1; border-radius: 8px; background: #0b0d11; }
+    button, select { background: #222734; color: var(--text); border: 1px solid #262b36; border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
+    button.on { background: var(--accent); color: #111; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Fly arena in the browser — port test</h1>
+
+  <h2>1. Match vs Python (same random numbers replayed)</h2>
+  <pre id="log">running…</pre>
+
+  <h2>2. Live: connectome brain playing the JavaScript arena</h2>
+  <div class="controls">
+    <button data-mode="brain" class="on">Connectome brain</button>
+    <button data-mode="klino">Klinotaxis rule</button>
+    <button data-mode="human">Keyboard</button>
+    <select id="level"><option value="0">level 0 · no predator</option><option value="1">level 1</option><option value="2">level 2</option></select>
+    <button id="reset">Reset</button>
+  </div>
+  <div class="row">
+    <canvas id="view" width="480" height="480"></canvas>
+    <pre id="live" class="muted">loading brain…</pre>
+  </div>
+
+  <script type="module">
+    import { FlyArena, seededRng } from "./sim/arena.js";
+    import { ArenaRenderer } from "./sim/arena_render.js";
+    import { KlinotaxisPolicy } from "./sim/policies.js";
+    import { FlyBrain } from "./sim/brain.js";
+
+    // ---------- 1. Python과 비교 ----------
+    const logEl = document.getElementById("log");
+    const lines = [];
+    const episodes = await fetch("data/arena_test.json").then((r) => r.json());
+    let allPass = true;
+    episodes.forEach((ep, e) => {
+      const u = [...ep.uniform], nv = [...ep.normal];
+      const env = new FlyArena({ level: ep.level, rng: { random: () => u.shift(), normal: () => nv.shift() } });
+      let obs = env.reset();
+      let maxObs = 0, maxRew = 0, eventMismatch = 0, termMismatch = 0;
+      const cmp = (a, b) => a.forEach((x, i) => { maxObs = Math.max(maxObs, Math.abs(x - b[i])); });
+      cmp(obs, ep.obs[0]);
+      ep.action.forEach((a, t) => {
+        const res = env.step(a);
+        cmp(res.obs, ep.obs[t + 1]);
+        maxRew = Math.max(maxRew, Math.abs(res.reward - ep.reward[t]));
+        if (res.events.join() !== ep.events[t].join()) eventMismatch++;
+        if (res.terminated !== ep.terminated[t]) termMismatch++;
+      });
+      const pass = maxObs < 1e-4 && maxRew < 1e-4 && !eventMismatch && !termMismatch && !u.length && !nv.length;
+      allPass &&= pass;
+      const evs = ep.events.flat();
+      lines.push(`episode ${e + 1} (level ${ep.level}, ${ep.action.length} steps, events: ${evs.join(", ") || "none"})`);
+      lines.push(`  max |obs diff| ${maxObs.toExponential(2)}  max |reward diff| ${maxRew.toExponential(2)}  ` +
+                 `event mismatches ${eventMismatch}  end mismatches ${termMismatch}  unused random ${u.length + nv.length}  → ${pass ? "MATCH" : "MISMATCH"}`);
+    });
+    lines.push(allPass ? "\nALL MATCH" : "\nMISMATCH FOUND");
+    logEl.textContent = lines.join("\n");
+    logEl.classList.add(allPass ? "ok" : "bad");
+    window.__arenaPass = allPass;
+
+    // ---------- 2. 실시간 플레이 ----------
+    const brain = await FlyBrain.load("data/");
+    const env = new FlyArena({ level: 0, rng: seededRng(7) });
+    const view = new ArenaRenderer(document.getElementById("view"));
+    const klino = new KlinotaxisPolicy({ window: 6 });
+    const keys = {};
+    let mode = "brain", obs, total, stepMs = [];
+
+    function reset() {
+      obs = env.reset(); brain.reset(); klino.reset(); total = 0;
+    }
+    reset();
+    document.querySelectorAll("[data-mode]").forEach((b) => b.onclick = () => {
+      mode = b.dataset.mode;
+      document.querySelectorAll("[data-mode]").forEach((x) => x.classList.toggle("on", x === b));
+    });
+    document.getElementById("level").onchange = (e) => { env.setLevel(+e.target.value); reset(); };
+    document.getElementById("reset").onclick = reset;
+    addEventListener("keydown", (e) => { keys[e.key] = 1; if (e.key.startsWith("Arrow") || e.key === " ") e.preventDefault(); });
+    addEventListener("keyup", (e) => { keys[e.key] = 0; });
+
+    setInterval(() => {
+      const t = performance.now();
+      brain.step(obs);                                  // 모든 모드에서 뇌는 같은 감각을 받음
+      let action;
+      if (mode === "brain") action = brain.action();
+      else if (mode === "klino") action = klino.act(obs);
+      else action = [(keys.ArrowUp || 0) - (keys.ArrowDown || 0), (keys.ArrowLeft || 0) - (keys.ArrowRight || 0), keys[" "] ? 1 : -1];
+      const res = env.step(action);
+      obs = res.obs; total += res.reward;
+      view.draw(env);
+      stepMs = [...stepMs, performance.now() - t].slice(-50);
+      const avg = stepMs.reduce((a, b) => a + b) / stepMs.length;
+      document.getElementById("live").textContent =
+        `mode ${mode} · level ${env.level}\nstep ${env.steps}  food ${env.score}  return ${total.toFixed(1)}\n` +
+        `action  forward ${action[0].toFixed(2)}  turn ${action[1].toFixed(2)}  jump ${action[2].toFixed(2)}\n` +
+        `brain + game + draw: ${avg.toFixed(1)} ms per frame`;
+      if (res.terminated || res.truncated) reset();
+    }, 50);
+  </script>
+</body>
+</html>
