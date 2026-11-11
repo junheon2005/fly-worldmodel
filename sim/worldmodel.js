@@ -1,3 +1,5 @@
+import { brainInputs, brainOutputs } from "./brain.js";
+
 // 월드모델 (브라우저용). worldmodel/export_onnx.py가 만든 ONNX 세 조각을 ONNX Runtime Web으로 실행한다.
 // 페이지에서 먼저 onnxruntime-web 스크립트를 불러와 전역 `ort`가 있어야 한다.
 //
@@ -84,6 +86,7 @@ export class WorldModel {
       ...out, h: this.h, z: this.z,
       postProbs: this.displayProbs(post), priorProbs: Float32Array.from(prior, Math.exp),
       surprise: this.kl(post, prior),
+      embed: r.embed ? r.embed.data.slice() : null,     // 인코더 출력 e (예전 ONNX 파일에는 없음)
     };
   }
 
@@ -138,7 +141,7 @@ export class WorldModel {
     const wm = this;
     const im = {
       h: this.h, z: this.z, brainState: brainState ?? brain.getState(), heads: null, k: 0, steps, done: false,
-      traj: { reward: [], value: [], cont: [], obs: [], action: [], rates: [], hz: [[this.h, this.z]] },
+      traj: { reward: [], value: [], cont: [], obs: [], action: [], rates: [], hz: [[this.h, this.z]], prior: [], io: [] },
       async advance(realBrain) {
         if (im.done) return;
         if (!im.heads) {
@@ -147,7 +150,9 @@ export class WorldModel {
         }
         const saved = realBrain.getState();
         realBrain.setState(im.brainState);
+        const before = brainInputs(realBrain);
         realBrain.step(im.heads.recon);
+        im.traj.io.push(brainOutputs(realBrain, before));   // 계산 화면용 뇌 입출력
         const action = realBrain.action();
         im.brainState = realBrain.getState();
         // 꿈속 뇌 활동 (0~255로 저장, 화면 재생용)
@@ -162,6 +167,7 @@ export class WorldModel {
         im.h = r.h_out.data.slice();
         im.z = wm.pickZ(r.prior.data);
         im.traj.hz.push([im.h, im.z]);       // 상태 지도에 상상 경로를 그리기 위해
+        im.traj.prior.push(Float32Array.from(r.prior.data, Math.exp));   // 층 화면의 prior 표시용
         im.traj.obs.push(im.heads.recon);
         im.traj.action.push(action);
         im.heads = await wm.readHeads(im.h, im.z);

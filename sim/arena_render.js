@@ -1,5 +1,6 @@
 // 아레나를 캔버스에 그린다 (env/fly_arena.py의 render와 같은 모습)
 import { ARENA, N_EYE } from "./arena.js";
+import { PAL_DARK, rgb } from "../palette.js";   // 먹이 초록, 포식자 빨강, 상상 파랑, 실제 초파리 흰색
 
 export class ArenaRenderer {
   constructor(canvas) {
@@ -54,12 +55,12 @@ export class ArenaRenderer {
       ctx.fillStyle = color;
       ctx.beginPath(); ctx.arc(x, y, r * scale, 0, 2 * Math.PI); ctx.fill();
     };
-    circle(env.food, ARENA.foodRadius, "rgb(60,220,90)");
-    if (env.predator) circle(env.predator, ARENA.predatorRadius, "rgb(230,60,60)");
+    circle(env.food, ARENA.foodRadius, rgb(PAL_DARK.food));
+    if (env.predator) circle(env.predator, ARENA.predatorRadius, rgb(PAL_DARK.pred));
 
     // 유령 초파리: 상상 속 행동을 따라간 경로 (점선) + 끝 위치의 반투명 초파리
     if (ghost && ghost.length > 1) {
-      ctx.strokeStyle = "rgba(140,220,255,0.75)";
+      ctx.strokeStyle = rgb(PAL_DARK.dream, 0.75);
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 3]);
       ctx.beginPath();
@@ -68,18 +69,18 @@ export class ArenaRenderer {
       ctx.setLineDash([]);
       ghost.forEach((p, i) => {          // 스텝마다 작은 점
         const [x, y] = px(p);
-        ctx.fillStyle = `rgba(140,220,255,${0.25 + 0.5 * (i / ghost.length)})`;
+        ctx.fillStyle = rgb(PAL_DARK.dream, 0.25 + 0.5 * (i / ghost.length));
         ctx.beginPath(); ctx.arc(x, y, 1.6, 0, 2 * Math.PI); ctx.fill();
       });
       // 상상이 시작된 위치 (빈 원) + 몇 스텝 전인지
       const [sx, sy] = px(ghost[0]);
-      ctx.strokeStyle = "rgba(140,220,255,0.9)";
+      ctx.strokeStyle = rgb(PAL_DARK.dream, 0.9);
       ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.arc(sx, sy, 4, 0, 2 * Math.PI); ctx.stroke();
       if (ghostAge != null) {
-        ctx.fillStyle = "rgba(140,220,255,0.95)";
+        ctx.fillStyle = rgb(PAL_DARK.dream, 0.95);
         ctx.font = "11px Consolas, monospace";
-        const label = ghostAge === 0 ? "dream from now" : `dream from ${ghostAge} steps ago`;
+        const label = ghostAge === 0 ? "imagined from now" : `imagined from ${ghostAge} steps ago`;
         const tw = ctx.measureText(label).width;
         // 오른쪽·위가 화면 밖이면 반대쪽에 씀
         const lx = sx + 7 + tw > size - 4 ? sx - 7 - tw : sx + 7;
@@ -89,7 +90,7 @@ export class ArenaRenderer {
       const [gx, gy, gh] = ghost.at(-1);
       const gc = Math.cos(gh), gs = Math.sin(gh);
       const g = (f, l) => px([gx + f * gc - l * gs, gy + f * gs + l * gc]);
-      ctx.fillStyle = "rgba(140,220,255,0.45)";
+      ctx.fillStyle = rgb(PAL_DARK.dream, 0.45);
       ctx.beginPath();
       [g(4, 0), g(-3, 2.5), g(-3, -2.5)].forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
       ctx.fill();
@@ -98,7 +99,7 @@ export class ArenaRenderer {
     // 초파리: 몸통 삼각형 + 더듬이
     const c = Math.cos(env.heading), s = Math.sin(env.heading);
     const at = (f, l) => px([env.pos[0] + f * c - l * s, env.pos[1] + f * s + l * c]);
-    ctx.fillStyle = "rgb(240,200,80)";
+    ctx.fillStyle = rgb(PAL_DARK.real);
     ctx.beginPath();
     [at(4, 0), at(-3, 2.5), at(-3, -2.5)].forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
     ctx.fill();

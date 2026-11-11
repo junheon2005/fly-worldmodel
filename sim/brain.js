@@ -118,3 +118,13 @@ export class FlyBrain {
     return a;
   }
 }
+
+// 계산 화면용 뇌 입출력: 한 스텝 전(적응 기준 c, 발화율 ρ)과 후(감각 s, 감각뉴런 입력 I, 행동 출력 y)
+export function brainInputs(brain) {
+  const r = new Uint8Array(brain.n);
+  for (let i = 0; i < brain.n; i++) { const v = brain.v[i]; r[i] = v > 0 ? Math.min(255, Math.tanh(v) * 255) : 0; }
+  return { c: brain.adapted.slice(), rPrev: r };
+}
+export function brainOutputs(brain, before) {
+  return { ...before, s: brain.sensed.slice(), I: Float32Array.from(brain.in_neurons, (i) => brain.ext[i]), y: brain.out.slice() };
+}

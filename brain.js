@@ -1,16 +1,31 @@
 // 왼쪽 패널: 실제 뉴런 위치에 발화율을 색으로 표시하는 3D 점구름
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { PAL, PAL_DARK, rgb, unit } from "./palette.js";
 
-export const GROUP_COLORS = {
-  in_odor_food: [0.30, 0.77, 0.42],
-  in_odor_co2: [0.78, 0.75, 0.25],
-  in_looming: [0.29, 0.56, 0.89],
-  out_steer: [0.94, 0.54, 0.24],
-  out_forward: [0.70, 0.45, 0.95],
-  out_backward: [0.65, 0.45, 0.30],
-  out_escape: [0.95, 0.30, 0.30],
+// 뉴런 묶음 → 색 규칙(palette.js)의 어느 뜻인지. 감각 뉴런은 그 감각의 색, 하행뉴런은 걷기(주황) 또는 점프(자홍)
+const GROUP_ROLE = {
+  in_odor_food: "food",
+  in_odor_co2: "co2",
+  in_looming: "pred",
+  out_steer: "action",
+  out_forward: "action",
+  out_backward: "action",
+  out_escape: "jump",
 };
+const byRole = (pal, f) => Object.fromEntries(Object.entries(GROUP_ROLE).map(([k, r]) => [k, f(pal[r])]));
+export const GROUP_COLORS = byRole(PAL_DARK, unit);   // 3D 점 (어두운 배경)
+export const GROUP_SWATCH = byRole(PAL, rgb);         // 범례·목록의 색 점 (밝은 배경)
+// 3D 뇌 지도 범례. 위 칸(State map) 범례와 같은 색은 같은 뜻이다
+export const LEGEND = [
+  ["Food odor ORN", rgb(PAL.food)],
+  ["CO₂ ORN", rgb(PAL.co2)],
+  ["Looming LPLC2/LC4 (predator)", rgb(PAL.pred)],
+  ["Walking DNs (steer DNa01/02 · forward DNp09 · backward MDN)", rgb(PAL.action)],
+  ["Escape Giant Fiber (jump)", rgb(PAL.jump)],
+  ["other neurons (brighter = more active)", "#b9bec8"],
+];
+const DIFF_UP = unit(PAL_DARK.dream), DIFF_DOWN = unit(PAL_DARK.real);   // 상상에서 더 활발 = 파랑, 실제에서 더 활발 = 흰색
 export const GROUP_LABELS = {
   in_odor_food: "Food odor ORN",
   in_odor_co2: "CO₂ ORN",
@@ -20,7 +35,7 @@ export const GROUP_LABELS = {
   out_backward: "Backward MDN",
   out_escape: "Escape Giant Fiber",
 };
-const BASE = [0.55, 0.6, 0.7];
+const BASE = [0.62, 0.63, 0.66];   // 역할이 없는 뉴런: 색 없이 밝기만
 
 const vertexShader = `
   attribute float size;
@@ -41,12 +56,8 @@ const fragmentShader = `
     gl_FragColor = vec4(vColor, a * 0.85);
   }`;
 
-// 발화율 → 색: 어두운 회색 → 주황 → 노랑 → 흰색
-function heat(r) {
-  if (r < 0.33) { const t = r / 0.33; return [0.9 * t, 0.35 * t, 0.05 * t]; }
-  if (r < 0.66) { const t = (r - 0.33) / 0.33; return [0.9 + 0.1 * t, 0.35 + 0.5 * t, 0.05 + 0.05 * t]; }
-  const t = (r - 0.66) / 0.34; return [1, 0.85 + 0.15 * t, 0.1 + 0.9 * t];
-}
+// 발화율 → 밝기. 색상은 뉴런의 역할만 나타내고, 얼마나 활발한지는 밝기로만 나타낸다
+const glow = (r) => Math.pow(r, 0.6);
 
 // onPick(i): 뉴런을 클릭하면 호출 (드래그로 회전할 때는 호출하지 않음)
 export function createBrainView(container, tooltip, init, { onPick = null } = {}) {
@@ -93,15 +104,15 @@ export function createBrainView(container, tooltip, init, { onPick = null } = {}
   let rates = new Uint8Array(n);
 
   // newRates: 발화율 (0~255)
-  // diffFrom: 주면 (newRates − diffFrom)을 빨강(증가)/파랑(감소)으로 표시 (꿈 − 실제 비교)
-  // clamped:  [[뉴런, 값], ...] 강제로 켠(하늘색)/끈(보라색) 뉴런
+  // diffFrom: 주면 (newRates − diffFrom)을 파랑(상상에서 더 활발)/흰색(실제에서 더 활발)으로 표시
+  // clamped:  [[뉴런, 값], ...] 강제로 켠(흰색)/끈(어두운 회색) 뉴런
   function update(newRates, { diffFrom = null, clamped = [] } = {}) {
     rates = newRates;
     if (diffFrom) {
       for (let i = 0; i < n; i++) {
         const d = (newRates[i] - diffFrom[i]) / 255;
         const m = Math.min(1, Math.abs(d) * 3);
-        const c = d > 0 ? [1, 0.35, 0.2] : [0.25, 0.55, 1];
+        const c = d > 0 ? DIFF_UP : DIFF_DOWN;
         for (let k = 0; k < 3; k++) colors[3 * i + k] = base[3 * i + k] * 0.05 + c[k] * m;
       }
       markClamped(clamped);
@@ -111,13 +122,13 @@ export function createBrainView(container, tooltip, init, { onPick = null } = {}
     }
     for (let i = 0; i < n; i++) {
       const r = rates[i] / 255;
-      const h = heat(r);
+      const g = glow(r);
       const isGroup = init.group[i] !== "";
-      // 일반 뉴런은 흐리게, 입출력 뉴런은 자기 색으로 밝아지게
+      // 역할이 있는 뉴런은 자기 색이 밝아지고, 나머지는 회색이 밝아진다
       for (let k = 0; k < 3; k++) {
         colors[3 * i + k] = isGroup
-          ? base[3 * i + k] * (0.35 + 1.4 * r) + h[k] * 0.3
-          : base[3 * i + k] * 0.06 + h[k] * 0.45;
+          ? base[3 * i + k] * (0.3 + 1.1 * r) + g * 0.1
+          : base[3 * i + k] * (0.05 + 0.85 * g);
       }
     }
     markClamped(clamped);
@@ -126,7 +137,7 @@ export function createBrainView(container, tooltip, init, { onPick = null } = {}
   }
 
   function markClamped(clamped) {
-    for (const [i, v] of clamped) colors.set(v > 0 ? [0.55, 0.95, 1] : [0.6, 0.3, 0.9], 3 * i);
+    for (const [i, v] of clamped) colors.set(v > 0 ? [1, 1, 1] : [0.2, 0.21, 0.24], 3 * i);
   }
 
   // 마우스를 올리면 뉴런 이름·발화율 표시

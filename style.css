@@ -1,18 +1,31 @@
 :root {
-  --bg: #0f1115;
-  --panel: #171a21;
-  --line: #262b36;
-  --text: #e6e8ee;
-  --muted: #8a91a2;
-  --accent: #f0c850;
-  --food: #4cc46a;
-  --co2: #c8c040;
-  --loom: #4a90e2;
-  --dn: #f08a3c;
-  --bad: #e05050;
+  --bg: #eef0f3;
+  --panel: #ffffff;
+  --line: #e1e4e9;
+  --text: #1b1e26;
+  --muted: #646b7a;
+  --accent: #e3b23c;
+  /* 뜻이 있는 색 (palette.js와 같은 값. 한 색은 한 가지 뜻) */
+  --food: #3f9a52;    /* 먹이 · 먹이 냄새 */
+  --co2: #b39b14;     /* CO2 */
+  --pred: #d64545;    /* 포식자 · 다가오는 물체 */
+  --calm: #78829a;    /* 특별한 감각 없음 */
+  --real: #1b1e26;    /* 실제: 지금 · 지나온 경로 */
+  --dream: #2a78d6;   /* 월드모델이 만든 것: 상상 · 복원 */
+  --action: #e07a2c;  /* 걷기 행동 */
+  --jump: #be3c96;    /* 점프 · 도망 */
+  --wm: #3c3489;      /* 월드모델 (구조 그림 틀 · 칸 제목) */
+  --brain: #085041;   /* 뇌 (구조 그림 틀 · 칸 제목) */
+  /* 예전 이름 (legacy.html) */
+  --loom: var(--pred);
+  --dn: var(--action);
+  --bad: var(--pred);
+  --well: #f4f5f8;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0;
   background: var(--bg);
@@ -37,7 +50,7 @@ h3 { font-size: 12px; margin: 12px 0 6px; color: var(--muted); font-weight: 600;
 .muted { color: var(--muted); }
 .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 button, select {
-  background: #222734;
+  background: #ffffff;
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -45,12 +58,13 @@ button, select {
   font: inherit;
   cursor: pointer;
 }
-button:hover { border-color: #3a4152; }
+button:hover { border-color: #b8bec9; }
 .seg { display: flex; }
 .seg button { border-radius: 0; }
 .seg button:first-child { border-radius: 6px 0 0 6px; }
 .seg button:last-child { border-radius: 0 6px 6px 0; }
-.seg button.on { background: var(--accent); color: #111; border-color: var(--accent); }
+/* 선택된 버튼은 뜻이 있는 색과 겹치지 않게 검정으로 */
+.seg button.on { background: var(--real); color: #fff; border-color: var(--real); }
 
 main {
   flex: 1;
@@ -67,6 +81,8 @@ main {
   min-width: 0;
 }
 .panel-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.panel-head.section { margin-top: 20px; gap: 12px; }
+.panel-head h2 { white-space: nowrap; }
 
 #brain-view {
   position: relative;
@@ -80,6 +96,7 @@ main {
 #tooltip {
   position: absolute;
   pointer-events: none;
+  color: #e6e8ee;
   background: rgba(0, 0, 0, .8);
   padding: 3px 7px;
   border-radius: 4px;
@@ -91,7 +108,7 @@ main {
 .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
 
 .bars { display: grid; grid-template-columns: auto 1fr 40px; gap: 3px 8px; align-items: center; font-size: 12px; }
-.bars .track { height: 10px; background: #0b0d11; border-radius: 3px; position: relative; overflow: hidden; }
+.bars .track { height: 10px; background: var(--well); border-radius: 3px; position: relative; overflow: hidden; }
 .bars .fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 3px; }
 .bars .fill.center { left: 50%; }
 .bars .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
@@ -99,7 +116,7 @@ main {
 .sense { display: grid; gap: 6px; }
 .sense-row { display: grid; grid-template-columns: 90px 1fr; align-items: center; font-size: 12px; }
 .lr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-.lr .track { height: 12px; background: #0b0d11; border-radius: 3px; position: relative; overflow: hidden; }
+.lr .track { height: 12px; background: #e6e8ec; border-radius: 3px; position: relative; overflow: hidden; }
 .lr .fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
 canvas { width: 100%; display: block; }
 
@@ -110,7 +127,7 @@ canvas { width: 100%; display: block; }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(23, 26, 33, .82);
+  background: rgba(255, 255, 255, .86);
   color: var(--muted);
   border: 1px dashed var(--line);
   border-radius: 8px;
@@ -118,15 +135,15 @@ canvas { width: 100%; display: block; }
 
 #game { width: 100%; border-radius: 8px; background: #0b0d11; aspect-ratio: 1; display: block; }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
-.stats div { background: #0b0d11; border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; }
+.stats div { background: var(--well); border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; }
 .stats b { font-size: 18px; font-variant-numeric: tabular-nums; }
 .stats span { font-size: 11px; color: var(--muted); }
 .hint { margin: 8px 0 0; display: none; }
 #events { list-style: none; margin: 0; padding: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
 #events li { padding: 2px 0; border-bottom: 1px solid var(--line); }
 #events .food { color: var(--food); }
-#events .escaped { color: var(--loom); }
-#events .caught { color: var(--bad); }
+#events .escaped { color: var(--jump); }
+#events .caught { color: var(--pred); }
 
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; }
@@ -141,25 +158,92 @@ canvas { width: 100%; display: block; }
 .ctl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .group-ctl { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 6px; align-items: center; }
 .group-ctl i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
-button.stim.on { background: #8cf2ff; color: #111; border-color: #8cf2ff; }
-button.sil.on { background: #9a4de6; color: #fff; border-color: #9a4de6; }
+button.stim.on { background: var(--real); color: #fff; border-color: var(--real); }
+button.sil.on { background: #8a919e; color: #fff; border-color: #8a919e; }
 .ghost-toggle { display: block; margin-top: 8px; font-size: 12px; }
-.ghost-key { display: inline-block; width: 18px; border-top: 2px dashed rgb(140,220,255); vertical-align: middle; margin: 0 4px; }
+.ghost-key { display: inline-block; width: 18px; border-top: 2px dashed var(--dream); vertical-align: middle; margin: 0 4px; }
 
 /* 가운데 패널: 상태 지도 · 접기 */
-#state-map { border-radius: 8px; background: #0b0d11; }
-#timeline { border-radius: 8px; background: #0b0d11; }
-#action-map { border-radius: 8px; background: #0b0d11; }
+#state-map { border-radius: 8px; background: #fafbfc; border: 1px solid var(--line); }
+#action-space { border-radius: 8px; background: #fafbfc; border: 1px solid var(--line); aspect-ratio: 1.7 / 1; max-height: 240px; }
 .act-num { margin-top: 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .act-note { font-size: 11px; }
 /* 접었다 펴는 영역 (뉴런 조작) */
 details.fold { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 6px; }
 details.fold summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; }
 details.fold[open] summary { margin-bottom: 6px; }
-.clamp-info { margin-left: 6px; color: rgb(140,220,255); font-weight: 400; }
-.lr .tick { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #fff; border-radius: 1px; }
+.clamp-info { margin-left: 6px; color: var(--muted); font-weight: 400; }
+.lr .tick { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--dream); border-radius: 1px; }   /* 월드모델이 복원한 값 */
 .reflex { display: block; font-size: 12px; line-height: 1.5; margin-top: 4px; }
 .reflex input { vertical-align: -2px; margin-right: 4px; }
+/* app.html 탐색 화면: 오른쪽 1/3 게임, 왼쪽 2/3을 위(월드모델)·아래(뇌)로 나누고, 각 절반은 상세 화면 + 층 구조 그림 */
+main.explorer { grid-template-columns: 2fr 1fr; }
+/* 왼쪽 2/3: [층 구조 그림 한 칸(위아래 전체)] [월드모델 상세(위) / 뇌 상세(아래)] */
+.explorer .left { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); grid-template-rows: 1fr 1fr; gap: 1px; background: var(--line); min-height: 0; min-width: 0; }
+.explorer .flow { grid-column: 1; grid-row: 1 / span 2; background: var(--panel); padding: 10px 8px; min-height: 0; display: flex; align-items: center; }
+.explorer .flow svg { width: 100%; height: 100%; max-height: 100%; display: block; }
+.explorer .flow text { font-family: "Segoe UI", system-ui, sans-serif; }
+.explorer .half { grid-column: 2; display: flex; flex-direction: column; overflow: hidden; padding: 10px 14px; }
+.explorer .half .panel-head { margin-bottom: 6px; }
+.explorer .half.wm .panel-head h2 { color: var(--wm); }
+.explorer .half.br .panel-head h2 { color: var(--brain); }
+.detail { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; padding-right: 4px; }
+.detail .view h3:first-child { margin-top: 0; }
+.view.fill:not([hidden]) { display: flex; flex-direction: column; height: 100%; }
+.explorer #brain-view { aspect-ratio: auto; flex: 1; min-height: 180px; }
+.explorer #state-map { height: 260px; }
+.explorer #action-space { max-height: 220px; }
+.xd-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.xd-head .muted { font-size: 12px; }
+.xd-title { font-weight: 600; font-size: 13px; }
+.xd-formula { font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px; margin: 4px 0 6px; overflow-wrap: anywhere; color: #2b303b; }
+.xd-text { font-size: 12.5px; line-height: 1.55; }
+.xd-note { font-size: 12px; line-height: 1.5; color: var(--muted); margin-top: 4px; }
+.xd-hov { font-size: 12px; color: var(--muted); min-height: 18px; }
+.xd-sense { margin: 6px 0 4px; }
+.xd-scroll { overflow-x: auto; margin-top: 6px; }
+.xd-table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.xd-table th { font-weight: 600; text-align: right; padding: 2px 10px; }
+.xd-table th:first-child, .xd-table td:first-child { text-align: left; padding-left: 0; color: var(--text); }
+.xd-table td { text-align: right; padding: 2px 10px; }
+#wml-canvas, #brl-canvas { margin-top: 6px; }
+/* 계산 화면: 단계 버튼, 수식 */
+.xd-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 2px; }
+.xd-steps:empty { display: none; }
+.xd-steps button { padding: 1px 9px; font-size: 11.5px; border-radius: 11px; }
+.xd-steps button.on { background: var(--real); color: #fff; border-color: var(--real); }
+.xd-tex { font-size: 12.5px; min-height: 20px; margin: 3px 0 0; white-space: nowrap; overflow: hidden; color: var(--text); }
+.xd-tex .katex { font-size: 1.08em; }
+.xd-hov sub, .xd-text sub, .xd-note sub, .xd-head sub, #wm-num sub, h3 sub { font-size: 75%; line-height: 0; }
+@media (max-width: 1100px) {
+  main.explorer { grid-template-columns: 1fr; }
+  .explorer .left { grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
+  .explorer .flow { grid-row: auto; }
+  .explorer .flow svg { height: auto; max-height: 640px; }
+  .explorer .half { grid-column: 1; overflow: visible; }
+  .explorer #brain-view { height: 360px; flex: none; }
+}
+
+/* 스크롤바 없이 한 화면에: 칸 안의 그림은 남은 높이에 맞춰 그리고(explorer.js), 스크롤바는 숨긴다 */
+.panel, .detail, .xd-scroll, .flow { scrollbar-width: none; }
+.panel::-webkit-scrollbar, .detail::-webkit-scrollbar, .xd-scroll::-webkit-scrollbar, .flow::-webkit-scrollbar { display: none; }
+#wmv-statemap:not([hidden]), #brv-action:not([hidden]) { display: flex; flex-direction: column; height: 100%; }
+#wmv-statemap .wm-block { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.explorer #state-map { flex: 1 1 0; min-height: 120px; height: auto; }
+.explorer #action-space { flex: 1 1 0; min-height: 120px; max-height: none; aspect-ratio: auto; }
+.explorer > .panel.game { display: flex; flex-direction: column; overflow: hidden; }
+.explorer #game { width: min(100%, calc(100vh - 330px)); height: auto; margin: 0 auto; }
+.explorer #events { flex: 1; min-height: 0; overflow: hidden; }
+.explorer .half { overflow: hidden; }
+.explorer #brain-view { min-height: 100px; }
+.explorer #reward-chart { height: 56px; }
+.explorer #eyes { height: 26px; }
+/* 낮은 화면: explorer.js tighten()이 단계를 정한다 */
+.detail[data-tight="1"] .xd-note, .detail[data-tight="2"] .xd-note { display: none; }
+.detail[data-tight="2"] .xd-text, .detail[data-tight="2"] .xd-formula { font-size: 11px; line-height: 1.4; margin-bottom: 2px; }
+.detail[data-tight="2"] .xd-sense .legend { display: none; }
+.detail[data-tight="2"] .xd-table tbody tr:nth-child(n+4) { display: none; }
+
 .legacy-banner { background: #3a2a10; color: #f0c850; font-size: 12px; padding: 6px 16px; border-bottom: 1px solid #5a4318; }
 .legacy-banner code { background: rgba(0,0,0,.3); padding: 0 4px; border-radius: 3px; }
 .legacy-banner a { color: #ffd979; }

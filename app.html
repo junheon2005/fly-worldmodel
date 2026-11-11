@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Fly World Model</title>
   <link rel="stylesheet" href="style.css">
+  <!-- 층 계산 화면의 수식 (KaTeX) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
   <script type="importmap">
     { "imports": {
@@ -17,6 +20,10 @@
   <header>
     <h1>Fly World Model</h1>
     <div class="controls">
+      <div class="seg" id="src-mode" title="What the world model and brain panels show">
+        <button data-src="real" class="on">Real play</button>
+        <button data-src="dream">Imagination</button>
+      </div>
       <div class="seg" id="mode">
         <button data-mode="brain" class="on">Connectome brain</button>
         <button data-mode="human">Keyboard</button>
@@ -35,83 +42,104 @@
     </div>
   </header>
 
-  <main>
-    <!-- 왼쪽: 뇌 -->
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Fly brain activity</h2>
-        <span class="muted" id="brain-info"></span>
-      </div>
-      <div id="brain-view"><div id="tooltip"></div></div>
-      <div class="brain-bar">
-        <div class="seg small" id="brain-mode">
-          <button data-v="live" class="on">Live</button>
-          <button data-v="dream">Dream</button>
-          <button data-v="diff">Dream − Live</button>
-        </div>
-        <span class="muted" id="dream-info"></span>
-      </div>
-      <div class="legend" id="legend"></div>
-      <details id="perturb" class="fold">
-        <summary>Perturb neurons <span class="muted">(clamp membrane potential)</span> <span class="clamp-info" id="clamp-info"></span></summary>
-        <div class="ctl">
-          <div id="picked" class="muted">Click a neuron in the 3D view to select it.</div>
-          <div id="group-ctl" class="group-ctl"></div>
-          <div class="ctl-row"><button id="unclamp">Release all</button></div>
-          <label class="reflex"><input type="checkbox" id="reflex">
-            <b>Reflex jump</b> — Giant Fiber firing above threshold triggers a jump (real fly circuit).
-            <span class="muted">Experimental: not used in training; off = same behavior as the trained Python brain.</span></label>
-        </div>
-      </details>
-    </section>
+  <main class="explorer">
+    <div class="left">
+      <!-- 왼쪽 세로 한 칸: 월드모델과 뇌의 층 구조를 하나의 그림으로 (둘 사이 화살표가 끊기지 않게) -->
+      <div class="flow"><svg id="flow-svg" viewBox="0 0 360 640" role="img" aria-label="World model and fly brain layers with the senses and actions they exchange"></svg></div>
 
-    <!-- 가운데: 월드모델 -->
-    <section class="panel">
-      <div class="panel-head">
-        <h2>World model</h2>
-        <span class="muted" id="wm-num"></span>
-      </div>
-      <div class="wm-block" id="wm">
-        <h3>State map <span class="muted">· world model state (h ⊕ z, 512-d) reduced to 2-D by PCA</span></h3>
-        <canvas id="state-map" height="300"></canvas>
-        <div class="legend" id="map-legend"></div>
-
-        <h3>Senses: real vs reconstructed <span class="muted">· the reconstruction is what the brain receives while dreaming</span></h3>
-        <div class="sense">
-          <div class="sense-row"><span>Food odor</span><div class="lr" id="o-food"></div></div>
-          <div class="sense-row"><span>CO₂</span><div class="lr" id="o-co2"></div></div>
-          <div class="sense-row"><span>Left / right eye</span><canvas id="eyes" height="26"></canvas></div>
+      <!-- 오른쪽 위: 월드모델 상세 화면 -->
+      <section class="panel half wm">
+        <div class="panel-head">
+          <h2>World model</h2>
+          <span class="muted" id="wm-num"></span>
         </div>
-        <div class="legend">
-          <span><i style="background:var(--food)"></i>real (bar)</span>
-          <span><i style="background:#fff"></i>reconstructed (tick · lower eye strip)</span>
-        </div>
+          <div class="detail" id="wm-detail">
+            <div class="view" id="wmv-statemap">
+              <h3>State map <span class="muted">· model state (h<sub>t</sub>, z<sub>t</sub>), 512-d, reduced to 2-D by PCA</span></h3>
+              <div class="wm-block" id="wm">
+                <canvas id="state-map" height="300"></canvas>
+                <div class="legend" id="map-legend"></div>
+                <div class="wm-empty" id="wm-empty">World model not trained yet</div>
+              </div>
+            </div>
+            <div class="view" id="wmv-layer" hidden>
+              <div id="wml-head"></div>
+              <div id="wml-steps" class="xd-steps"></div>
+              <div id="wml-tex" class="xd-tex"></div>
+              <div id="wml-sense" class="xd-sense" hidden>
+                <div class="sense">
+                  <div class="sense-row"><span>Food odor</span><div class="lr" id="o-food"></div></div>
+                  <div class="sense-row"><span>CO₂</span><div class="lr" id="o-co2"></div></div>
+                  <div class="sense-row"><span>Left / right eye</span><canvas id="eyes" height="26"></canvas></div>
+                </div>
+                <div class="legend">
+                  <span>bar · upper eye strip = real</span>
+                  <span><i style="background:var(--dream)"></i>world model's reconstruction (tick · lower eye strip)</span>
+                </div>
+              </div>
+              <canvas id="wml-canvas"></canvas>
+              <div id="wml-hov" class="xd-hov"></div>
+              <div id="wml-body"></div>
+            </div>
+          </div>
+      </section>
 
-        <h3>Timeline <span class="muted">· right of the dashed line: the latest imagined 15 steps (its start step is labeled)</span></h3>
-        <canvas id="timeline" height="180"></canvas>
-        <div class="legend">
-          <span><i style="background:var(--muted)"></i>actual reward</span>
-          <span><i style="background:var(--accent)"></i>predicted reward</span>
-          <span><i style="background:var(--loom)"></i>value</span>
-          <span><i style="background:var(--bad)"></i>surprise (KL), red = unusually high</span>
+      <!-- 오른쪽 아래: 초파리 뇌 상세 화면 -->
+      <section class="panel half br">
+        <div class="panel-head">
+          <h2>Fly brain</h2>
+          <span class="muted" id="brain-info"></span>
         </div>
-        <div class="wm-empty" id="wm-empty">World model not trained yet</div>
-      </div>
-      <h3>Action map <span class="muted">· background: world model's predicted reward over the next 4 steps if each action were held, relative to the average here</span></h3>
-      <canvas id="action-map" height="200"></canvas>
-      <div class="legend">
-        <span><i style="background:rgb(76,196,106)"></i>better than average</span>
-        <span><i style="background:rgb(240,45,60)"></i>worse</span>
-        <span><i style="background:var(--accent)"></i>action taken (tail = last 30 steps)</span>
-        <span>○ brain's choice (keyboard mode)</span>
-        <span>☆ world model's best guess</span>
-      </div>
-      <div class="act-num" id="act-num"></div>
-      <div class="muted act-note" id="act-note">(chosen at this state, applied on the next step)</div>
-    </section>
+          <div class="detail" id="brain-detail">
+            <div class="view fill" id="brv-map">
+              <div id="brain-view"><div id="tooltip"></div></div>
+              <div class="brain-bar">
+                <div class="seg small" id="brain-mode">
+                  <button data-v="live" class="on">Real</button>
+                  <button data-v="dream">Imagined</button>
+                  <button data-v="diff">Imagined − Real</button>
+                </div>
+                <span class="muted" id="dream-info"></span>
+              </div>
+              <div class="legend" id="legend"></div>
+              <details id="perturb" class="fold">
+                <summary>Perturb neurons <span class="muted">(clamp membrane potential)</span> <span class="clamp-info" id="clamp-info"></span></summary>
+                <div class="ctl">
+                  <div id="picked" class="muted">Click a neuron in the 3D view to select it.</div>
+                  <div id="group-ctl" class="group-ctl"></div>
+                  <div class="ctl-row"><button id="unclamp">Release all</button></div>
+                  <label class="reflex"><input type="checkbox" id="reflex">
+                    <b>Reflex jump</b> — Giant Fiber firing above threshold triggers a jump (real fly circuit).
+                    <span class="muted">Experimental: not used in training; off = same behavior as the trained Python brain.</span></label>
+                </div>
+              </details>
+            </div>
+            <div class="view" id="brv-action" hidden>
+              <h3>Action path <span class="muted">· brain's output a<sub>t</sub>: floor = turn × forward, height = jump</span></h3>
+              <canvas id="action-space" height="300"></canvas>
+              <div class="legend">
+                <span><i style="background:var(--real)"></i>now</span>
+                <span><i style="background:rgba(27,30,38,.45)"></i>recent path (12 steps)</span>
+                <span><i style="background:var(--dream)"></i>imagined next steps</span>
+                <span><i style="background:var(--jump)"></i>jump output above 0.5</span>
+              </div>
+              <div class="act-num" id="act-num"></div>
+              <div class="muted act-note" id="act-note">(chosen at this state, applied on the next step)</div>
+            </div>
+            <div class="view" id="brv-layer" hidden>
+              <div id="brl-head"></div>
+              <div id="brl-steps" class="xd-steps"></div>
+              <div id="brl-tex" class="xd-tex"></div>
+              <canvas id="brl-canvas"></canvas>
+              <div id="brl-hov" class="xd-hov"></div>
+              <div id="brl-body"></div>
+            </div>
+          </div>
+      </section>
+    </div>
 
-    <!-- 오른쪽: 게임 -->
-    <section class="panel">
+    <!-- 오른쪽 1/3: 게임 -->
+    <section class="panel game">
       <div class="panel-head">
         <h2>Game</h2>
         <span class="muted" id="game-info"></span>
@@ -127,7 +155,7 @@
       <canvas id="reward-chart" height="70"></canvas>
       <p class="muted hint" id="hint">Keyboard: ↑↓ forward/back, ←→ turn, Space jump</p>
       <label class="muted ghost-toggle"><input type="checkbox" id="ghost">
-        Show dream path <span class="ghost-key"></span> where the fly would go if it followed its imagined actions (next 15 steps)</label>
+        Show imagined path <span class="ghost-key"></span> where the fly would go if it followed its imagined actions (next 15 steps)</label>
       <h3>Events</h3>
       <ul id="events"></ul>
     </section>

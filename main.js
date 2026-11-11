@@ -1,10 +1,11 @@
 // 프레임을 받아 세 패널을 갱신한다.
 // 출처는 두 가지: Python 서버(WebSocket, legacy.html) 또는 브라우저 안 시뮬레이션(sim/local_session.js, app.html)
-import { createBrainView, GROUP_COLORS, GROUP_LABELS } from "./brain.js";
+import { createBrainView, GROUP_SWATCH, GROUP_LABELS, LEGEND } from "./brain.js";
+import { setupExplorer, explorerFrame } from "./explorer.js";
+import { PAL, rgb, shade } from "./palette.js";
 
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const rgb = (c) => `rgb(${c.map((v) => Math.round(v * 255)).join(",")})`;
 
 let init = null;
 let brain = null;
@@ -26,9 +27,12 @@ let recentEye = [];             // 최근 10프레임의 눈 접근 신호 최�
 const HISTORY = 300;
 let wmMap = null;               // 상태 지도 (PCA): web/data/wm_map.json
 const mapTrail = [];            // 최근 상태 지도 위치 (꼬리)
-const MAP_COLORS = ["rgba(138,145,162,0.35)", "rgba(76,196,106,0.55)", "rgba(200,192,64,0.6)", "rgba(224,80,80,0.6)"];
-const MAP_SOLID = ["rgb(150,162,185)", "rgb(76,210,110)", "rgb(225,210,70)", "rgb(235,80,80)"];
-const TRAIL_RGB = "190,120,255";   // 최근 경로 (CO2 노랑과 구분되는 보라)
+// 색은 palette.js의 규칙을 따른다. 상태 지도 구역(평온 · 먹이 근처 · CO2 · 포식자)은 감각 색,
+// 지금 위치와 지나온 경로는 실제(검정), 상상한 앞날은 파랑
+const MAP_RGB = [PAL.calm, PAL.food, PAL.co2, PAL.pred];
+const MAP_SOLID = MAP_RGB.map((c) => rgb(c));
+const TRAIL_RGB = PAL.real.join(",");
+const DREAM = (a) => rgb(PAL.dream, a);
 
 // ---------- 막대 그래프 ----------
 function makeBars(el, labels, colors, centered = false) {
@@ -85,8 +89,10 @@ function makeLR(el, color) {
 function fitCanvas(c) {
   const r = window.devicePixelRatio || 1;
   const w = c.clientWidth, h = c.clientHeight || c.height;
-  if (c.width !== Math.round(w * r)) { c.width = Math.round(w * r); c.height = Math.round(h * r); }
   const ctx = c.getContext("2d");
+  // 숨겨진 캔버스는 크기를 건드리지 않는다. 건드리면 다시 보일 때마다 높이가 화면 배율만큼 불어난다
+  if (!w) return [ctx, 0, 0];
+  if (c.width !== Math.round(w * r) || Math.abs(c.height - Math.round(h * r)) > 1) { c.width = Math.round(w * r); c.height = Math.round(h * r); }
   ctx.setTransform(r, 0, 0, r, 0, 0);
   return [ctx, w, h];
 }
@@ -95,6 +101,7 @@ function fitCanvas(c) {
 function drawEyes(obs, id = "eyes", recon = null) {
   if (!$(id)) return;
   const [ctx, w, h] = fitCanvas($(id));
+  if (!w) return;
   const n = init.n_eye, gap = 10, cw = (w - gap) / (2 * n);
   ctx.clearRect(0, 0, w, h);
   const rows = recon ? [[obs, 0, h / 2 - 1], [recon, h / 2 + 1, h / 2 - 1]] : [[obs, 0, h]];
@@ -104,10 +111,12 @@ function drawEyes(obs, id = "eyes", recon = null) {
       // 왼눈은 바깥(왼쪽 뒤)→앞 순서로 보이도록 뒤집어 그린다
       const col = i < n ? n - 1 - i : i;
       const x = col * cw + (i >= n ? gap : 0);
-      ctx.fillStyle = `rgba(${Math.round(40 + 200 * v)}, ${Math.round(40 + 60 * v)}, ${Math.round(50 + 30 * v)}, 1)`;
+      ctx.fillStyle = shade(PAL.pred, v);
       ctx.fillRect(x, y0, cw - 1, rh);
     }
   }
+  // 아래 칸은 월드모델이 복원한 값: 파란 밑줄로 표시
+  if (recon) { ctx.fillStyle = DREAM(); ctx.fillRect(0, h - 1.5, w, 1.5); }
 }
 
 function drawReward() {
@@ -124,10 +133,10 @@ function drawReward() {
   // 큰 보상 이벤트는 세로 막대
   reward.forEach((r, i) => {
     if (Math.abs(r) < 1) return;
-    ctx.fillStyle = r > 0 ? css("--food") : css("--bad");
+    ctx.fillStyle = rgb(r > 0 ? PAL.food : PAL.pred);   // 먹이를 먹음 = 초록, 포식자에게 잡힘 = 빨강
     ctx.fillRect(x(i) - 1, 0, 2, h);
   });
-  ctx.strokeStyle = css("--accent");
+  ctx.strokeStyle = rgb(PAL.real);
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   total.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))));
@@ -242,7 +251,6 @@ function project(h, z) {
 //   1) 상태들을 격자에 상황별로 모으고 살짝 블러, 상황마다 따로 정규화 (개수가 적은 CO2도 보이게)
 //   2) 화면 픽셀마다 밀도를 보간해 가장 우세한 상황 하나의 색으로, 진하기는 4단계 띠로 나눔
 //   3) 단계가 바뀌는 경계에 얇은 선 (등고선)
-const MAP_RGB = [[150, 162, 185], [76, 210, 110], [225, 210, 70], [235, 80, 80]];
 const LEVELS = [0.1, 0.28, 0.5, 0.75];          // 밀도 문턱값
 const LEVEL_ALPHA = [0.16, 0.32, 0.5, 0.72];    // 단계별 진하기
 
@@ -320,7 +328,7 @@ function densityImage(pw, ph) {
 let mapBg = null, mapBgKey = "";
 function drawStateMap(cur, imagined) {
   const c = $("state-map");
-  if (!c || !wmMap) return;
+  if (!c || !wmMap || !c.clientWidth) return;     // 숨겨진 상태(다른 층을 보는 중)면 그리지 않음
   const [ctx, w, h] = fitCanvas(c);
   const [x0, x1, y0, y1] = wmMap.bounds;
   const pad = 28;
@@ -353,7 +361,7 @@ function drawStateMap(cur, imagined) {
   // 최근 궤적: 보라색 선 (오래될수록 흐리게)
   ctx.lineWidth = 2;
   for (let i = 1; i < mapTrail.length; i++) {
-    ctx.strokeStyle = `rgba(${TRAIL_RGB},${0.15 + 0.75 * (i / mapTrail.length)})`;
+    ctx.strokeStyle = `rgba(${TRAIL_RGB},${0.1 + 0.6 * (i / mapTrail.length)})`;
     ctx.beginPath();
     ctx.moveTo(X(mapTrail[i - 1][0]), Y(mapTrail[i - 1][1]));
     ctx.lineTo(X(mapTrail[i][0]), Y(mapTrail[i][1]));
@@ -363,20 +371,20 @@ function drawStateMap(cur, imagined) {
   if (imagined && imagined.hz && imagined.hz.length > 1) {
     const pts = imagined.hz.map(([hh, zz]) => project(hh, zz));
     // 상상이 시작된 상태 (빈 원): 지금보다 몇 스텝 전일 수 있음
-    ctx.strokeStyle = "rgba(140,220,255,0.9)"; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = DREAM(0.9); ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(X(pts[0][0]), Y(pts[0][1]), 4, 0, 2 * Math.PI); ctx.stroke();
-    ctx.strokeStyle = "rgba(140,220,255,0.85)";
+    ctx.strokeStyle = DREAM(0.85);
     ctx.setLineDash([4, 3]); ctx.lineWidth = 1.5;
     ctx.beginPath();
     pts.forEach(([px, py], i) => (i ? ctx.lineTo(X(px), Y(py)) : ctx.moveTo(X(px), Y(py))));
     ctx.stroke(); ctx.setLineDash([]);
     const [ex, ey] = pts[pts.length - 1];
-    ctx.fillStyle = "rgba(140,220,255,0.9)";
+    ctx.fillStyle = DREAM(0.9);
     ctx.beginPath(); ctx.arc(X(ex), Y(ey), 3.5, 0, 2 * Math.PI); ctx.fill();
   }
   // 현재 위치
   if (cur) {
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = rgb(PAL.real);
     ctx.beginPath(); ctx.arc(X(cur[0]), Y(cur[1]), 5, 0, 2 * Math.PI); ctx.fill();
     ctx.strokeStyle = `rgb(${TRAIL_RGB})`; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(X(cur[0]), Y(cur[1]), 8, 0, 2 * Math.PI); ctx.stroke();
@@ -386,211 +394,130 @@ function drawStateMap(cur, imagined) {
 function mapLegend() {
   if (!$("map-legend") || !wmMap) return;
   $("map-legend").innerHTML =
-    wmMap.labels.map((l, i) => `<span><i style="background:${MAP_SOLID[i]}"></i>${l}</span>`).join("") +
-    `<span><i style="background:#fff"></i>now</span><span><i style="background:rgb(${TRAIL_RGB})"></i>recent path</span>` +
-    `<span><i style="background:rgb(140,220,255)"></i>imagined 15 steps (○ = where the dream started)</span>` +
+    wmMap.labels.map((l, i) => `<span><i style="background:${MAP_SOLID[i]}"></i>${l.replace("CO2", "CO₂")}</span>`).join("") +
+    `<span><i style="background:${rgb(PAL.real)}"></i>now</span><span><i style="background:rgba(${TRAIL_RGB},0.45)"></i>recent path</span>` +
+    `<span><i style="background:${DREAM()}"></i>imagined 15 steps (○ = where the imagination started)</span>` +
     `<span class="muted">axes explain ${(100 * (wmMap.explained[0] + wmMap.explained[1])).toFixed(0)}% of state variance</span>`;
 }
 
-// ---------- 행동 지도: 고른 행동 + 행동마다 월드모델이 예상한 결과 ----------
-// 축은 행동값 그대로 (x = 회전, 왼쪽이 +1 / y = 전진), 점프는 오른쪽 칸.
-// 배경 = advantage: 후보 행동마다 상상한 4스텝 보상 합(Q)에서 이 상태의 평균을 뺀 값.
-// 상황 자체가 좋은지(먹이 근처 등)는 빼고 '여기서 어느 선택이 나은가'만 남긴다.
-const ACT_GOOD = "76,196,106", ACT_BAD = "240,45,60";
-const actTrail = [];                 // 최근 실제 행동 [회전, 전진] (꼬리)
-let actAdv = null, actScale = 0.05;  // 화면용 advantage (프레임 사이 부드럽게), 색이 꽉 차는 크기
-let lastAct = null;                  // 마지막 프레임의 행동 (일시정지 미리보기용)
+// ---------- 행동 궤적 (3D): 뇌가 내놓은 행동 3개를 그대로 좌표로 ----------
+// 바닥 = 회전(왼쪽 +1) × 전진, 높이 = 점프 출력. 지나온 행동은 보라색 꼬리, 상상한 앞으로의 행동은 하늘색 선.
+// 회전은 스텝마다 부호가 뒤집히는 일이 많아(지그재그) 위치는 짧은 이동평균으로 그린다.
+// 현재 점의 색만 평균 없이 이번 스텝의 점프 출력을 쓴다 (0.5 초과 = 빨강, 쿨다운과 무관).
+const ACT_TRAIL = 12, ACT_DREAM_POINTS = 8;
+const ACT_WINDOW = [3, 5, 3];         // 이동평균 길이: 전진, 회전, 점프
+const ACT_TH = (35 * Math.PI) / 180, ACT_PH = 0.3;    // 고정 카메라 (좌우 회전, 내려다보는 각)
+const ACT_HEIGHT = 0.45;              // 점프 축을 화면에 그리는 비율 (납작하게 해서 위아래 빈 공간을 줄임)
+const actHistory = [];                // 최근 실제 행동 [전진, 회전, 점프]
+let actDream = null;                  // 화면에 보이는 상상 선 (새 상상 쪽으로 천천히 옮겨 감)
+let lastAct = null;                   // 마지막 프레임의 행동 (일시정지 미리보기용)
 
-function drawStar(ctx, x, y, r) {
-  ctx.beginPath();
-  for (let k = 0; k < 10; k++) {
-    const a = -Math.PI / 2 + (k * Math.PI) / 5, rr = k % 2 ? r * 0.45 : r;
-    ctx.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a));
-  }
-  ctx.closePath();
-  ctx.fillStyle = "#fff"; ctx.fill();
-  ctx.strokeStyle = "#0b0d11"; ctx.lineWidth = 1; ctx.stroke();
-}
-
-function drawActionMap(whatif, act) {
-  const c = $("action-map");
-  if (!c || !init?.actionGrid || !act) return;
-  const { turns, forwards } = init.actionGrid;
-  const nT = turns.length, nF = forwards.length, JUMP = nT * nF;
-  const [ctx, w, h] = fitCanvas(c);
-  ctx.clearRect(0, 0, w, h);
-  const padL = 22, padT = 6, padB = 18, jumpW = 46, gap = 8;
-  const gx = padL, gy = padT, gw = w - padL - jumpW - gap - 4, gh = h - padT - padB;
-  const cw = gw / nT, ch = gh / nF;
-  const jx = gx + gw + gap, jcx = jx + (jumpW - 10) / 2;
-  // 행동값 → 화면 좌표 (칸 중심 = 그 칸의 행동값). 후진(전진 < 0)은 아래 가장자리에 붙임
-  const X = (t) => gx + cw / 2 + ((turns[0] - t) / (turns[0] - turns[nT - 1])) * (gw - cw);
-  const Y = (f) => {
-    const v = Math.max(forwards[nF - 1], Math.min(forwards[0], f));
-    return gy + ch / 2 + ((forwards[0] - v) / (forwards[0] - forwards[nF - 1])) * (gh - ch);
-  };
-  // 점프 쿨다운 중에는 점프해도 효과가 없으므로 점프 칸은 비교에서 뺌
-  const jumpReady = !whatif || whatif.cooldown === 0;
-  const usable = (i) => i < JUMP || jumpReady;
-  let best = -1;
-  if (whatif) {
-    // 기준(평균)과 색 크기는 걷기 격자 27칸으로만 정한다. 점프는 에너지 비용(−0.5) 때문에 평소 값이 훨씬 낮아서
-    // 함께 넣으면 격자 색이 모두 흐려진다. 점프 칸은 같은 기준에 비교해 칠하고, 넘치면 끝 색으로.
-    const q = whatif.q;
-    const mean = q.slice(0, JUMP).reduce((s, v) => s + v, 0) / JUMP;
-    const adv = q.map((v) => v - mean);
-    actAdv = actAdv ? actAdv.map((a, i) => 0.5 * a + 0.5 * adv[i]) : adv;
-    let maxAbs = 0;
-    actAdv.forEach((a, i) => {
-      if (i < JUMP) maxAbs = Math.max(maxAbs, Math.abs(a));
-      if (usable(i) && (best < 0 || a > actAdv[best])) best = i;
-    });
-    actScale = Math.max(maxAbs, actScale * 0.95, 0.05);   // 커지면 바로, 작아지면 천천히 (깜빡임 방지)
-  }
-  const fill = (a) => {
-    // 나쁜 쪽은 조금만 나빠도 눈에 띄게 더 진하게
-    const k = Math.max(-1, Math.min(1, a / actScale));
-    return k >= 0 ? `rgba(${ACT_GOOD},${0.08 + 0.72 * k})` : `rgba(${ACT_BAD},${0.12 + 0.83 * Math.sqrt(-k)})`;
-  };
-  const EMPTY = "rgba(138,145,162,0.08)";
-  for (let j = 0; j < nF; j++) for (let i = 0; i < nT; i++) {
-    ctx.fillStyle = actAdv ? fill(actAdv[j * nT + i]) : EMPTY;
-    ctx.fillRect(gx + i * cw + 1, gy + j * ch + 1, cw - 2, ch - 2);
-  }
-  // 점프 칸 + 고른 점프 값 (아래에서 채움, 흰 눈금 = 발동 문턱 0.5)
-  ctx.fillStyle = !jumpReady ? "rgba(138,145,162,0.12)" : actAdv ? fill(actAdv[JUMP]) : EMPTY;
-  ctx.fillRect(jx, gy + 1, jumpW, gh - 2);
-  const jv = (Math.max(-1, Math.min(1, act.action[2])) + 1) / 2;
-  ctx.fillStyle = "rgba(224,80,80,0.8)";
-  ctx.fillRect(jx + jumpW - 8, gy + 1 + (gh - 2) * (1 - jv), 5, (gh - 2) * jv);
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(jx + jumpW - 10, gy + 1 + (gh - 2) * 0.25 - 1, 9, 2);
-  const jumped = act.action[2] > 0.5 && jumpReady;
-  if (jumped) {
-    ctx.strokeStyle = css("--bad"); ctx.lineWidth = 2;
-    ctx.strokeRect(jx + 1, gy + 2, jumpW - 2, gh - 4);
-  }
-  ctx.fillStyle = "rgba(255,255,255,0.85)";   // 진한 빨강 칸 위에서도 읽히게
-  ctx.font = "11px Segoe UI";
-  ctx.textAlign = "center";
-  ctx.fillText("Jump", jcx, gy + 14);
-  if (!jumpReady) ctx.fillText("cooldown", jcx, gy + gh / 2 + 4);
-  ctx.fillStyle = css("--muted");
-  ctx.textAlign = "left"; ctx.fillText("◀ turn left", gx, h - 5);
-  ctx.textAlign = "center"; ctx.fillText("straight", X(0), h - 5);
-  ctx.textAlign = "right"; ctx.fillText("turn right ▶", gx + gw, h - 5);
-  ctx.save(); ctx.translate(13, gy + gh / 2); ctx.rotate(-Math.PI / 2);
-  ctx.textAlign = "center"; ctx.fillText("stop → forward", 0, 0);
-  ctx.restore();
-  ctx.textAlign = "left";
-  // ☆ 월드모델이 보기에 가장 나은 행동
-  if (best >= 0) {
-    if (best === JUMP) drawStar(ctx, jcx, gy + gh / 2 + 18, 7);
-    else drawStar(ctx, X(turns[best % nT]), Y(forwards[Math.floor(best / nT)]), 7);
-  }
-  // 꼬리 (오래될수록 흐리게) + 지금 고른 행동
-  actTrail.forEach(([t, f], k) => {
-    ctx.fillStyle = `rgba(240,200,80,${0.08 + 0.5 * (k / actTrail.length)})`;
-    ctx.beginPath(); ctx.arc(X(t), Y(f), 2.5, 0, 2 * Math.PI); ctx.fill();
+function actAverage(seq, i) {
+  return ACT_WINDOW.map((k, c) => {
+    const from = Math.max(0, i - k + 1);
+    let sum = 0;
+    for (let j = from; j <= i; j++) sum += seq[j][c];
+    return sum / (i - from + 1);
   });
-  const [f0, t0] = act.action;
-  ctx.fillStyle = css("--accent"); ctx.strokeStyle = "#0b0d11"; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.arc(X(t0), Y(f0), 6, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
-  // 키보드 모드: 뇌였다면 고를 행동 (빈 원)
-  const showBrain = act.mode !== "brain" && act.brain;
-  if (showBrain) {
-    ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(X(act.brain[1]), Y(act.brain[0]), 6, 0, 2 * Math.PI); ctx.stroke();
-  }
-
-  // 숫자: 고른 행동 + 월드모델 기준 순위 (가장 가까운 후보 칸, 점프가 발동했으면 점프 칸)
-  const rankOf = (a) => {
-    if (!actAdv) return null;
-    let idx = JUMP;
-    if (!(a[2] > 0.5 && jumpReady)) {
-      const near = (arr, v) => arr.reduce((b, x, i) => (Math.abs(x - v) < Math.abs(arr[b] - v) ? i : b), 0);
-      idx = near(forwards, a[0]) * nT + near(turns, a[1]);
-    }
-    let rank = 1, total = 0;
-    actAdv.forEach((v, i) => { if (usable(i)) { total++; if (v > actAdv[idx]) rank++; } });
-    return `${rank} / ${total}`;
-  };
-  const turnText = (t) => `${t >= 0 ? "+" : "−"}${Math.abs(t).toFixed(2)} (${Math.abs(t) < 0.05 ? "straight" : t > 0 ? "left" : "right"})`;
-  const who = act.mode === "brain" ? "brain" : "you";
-  let text = `forward ${f0.toFixed(2)} · turn ${turnText(t0)} · jump ${act.action[2].toFixed(2)}${jumped ? " (jumping)" : ""}`;
-  const r = rankOf(act.action);
-  if (r) text += ` — world model ranks ${who === "brain" ? "the brain's" : "your"} choice <b>${r}</b>`;
-  if (showBrain && actAdv) text += ` · brain would rank ${rankOf(act.brain)}`;
-  $("act-num").innerHTML = text;
 }
 
-// ---------- 타임라인: 보상 · 가치 · 놀람을 같은 시간축에 세 줄로 ----------
-function drawTimeline(imagined) {
-  const c = $("timeline");
-  if (!c) return;
+// 상상 궤적에서 지금(step) 이후의 행동만 골라, 실제 행동과 이어지게 평균 낸 뒤 일정 개수로 줄인다.
+// action[k]는 상태 originStep + k에서 고른 행동이다.
+function actDreamTarget(imagined, step) {
+  if (!imagined?.action?.length || imagined.originStep == null || step == null) return null;
+  const future = imagined.action.slice(Math.max(0, step - imagined.originStep + 1));
+  if (!future.length) return null;
+  const seq = [...actHistory.slice(-4), ...future], base = seq.length - future.length;
+  const smooth = future.map((_, k) => actAverage(seq, base + k));
+  return Array.from({ length: ACT_DREAM_POINTS }, (_, k) =>
+    smooth[Math.round((k * (smooth.length - 1)) / (ACT_DREAM_POINTS - 1))]);
+}
+
+function drawActionSpace(imagined, act, { snap = false } = {}) {
+  const c = $("action-space");
+  if (!c || !act || !actHistory.length || !c.clientWidth) return;   // 숨겨진 상태면 그리지 않음
   const [ctx, w, h] = fitCanvas(c);
   ctx.clearRect(0, 0, w, h);
-  const labelW = 58, split = labelW + (w - labelW) * 0.78;
-  const lanes = [["reward", 0, h * 0.36], ["value", h * 0.38, h * 0.3], ["surprise", h * 0.7, h * 0.3]];
-  const H = (imagined && imagined.reward) ? imagined.reward.length : 0;
-  const n = history.pred.length;
-  const age = (H && imagined.originStep != null && lastStep != null) ? lastStep - imagined.originStep : null;
-  const hx = (i) => labelW + ((i + HISTORY - n) / (HISTORY - 1)) * (split - labelW);
-  const fx = (k) => split + (H ? k / H : 0) * (w - split - 4);
-  ctx.font = "11px Segoe UI";
-  for (const [name, top, lh] of lanes) {
-    ctx.fillStyle = css("--muted");
-    ctx.fillText(name, 4, top + 13);
-    ctx.strokeStyle = css("--line");
-    ctx.beginPath(); ctx.moveTo(labelW, top + lh - 1); ctx.lineTo(w, top + lh - 1); ctx.stroke();
-  }
-  ctx.strokeStyle = css("--line");
-  ctx.setLineDash([3, 3]);
-  ctx.beginPath(); ctx.moveTo(split, 0); ctx.lineTo(split, h); ctx.stroke();
-  ctx.setLineDash([]);
-  if (age != null) {
-    ctx.fillStyle = "rgba(140,220,255,0.9)";
-    ctx.fillText(age === 0 ? "imagined from now" : `imagined from ${age} steps ago`, split + 4, 12);
-  }
-  const line = (arr, x, y, color, dash = []) => {
-    if (!arr.length) return;
-    ctx.strokeStyle = color; ctx.setLineDash(dash); ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    arr.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v))));
-    ctx.stroke(); ctx.setLineDash([]);
+  // 행동 공간 전체(점프 최대까지)가 캔버스에 딱 맞게. 위 여백은 점 크기, 아래 여백은 글자 자리, 1.5는 왼쪽 글자 위치
+  const padT = 10, padB = 18;
+  const extent = Math.cos(ACT_TH) + Math.sin(ACT_TH), halfV = ACT_HEIGHT + extent * Math.sin(ACT_PH);
+  const unit = Math.min((w / 2 - 24) / 1.5, (h - padT - padB) / (2 * halfV));
+  const line = Math.max(1, Math.min(1.5, unit / 82));
+  const ox = w / 2, oy = padT + (h - padT - padB) / 2;
+  const P = (X, Z, Y) => {
+    const rx = X * Math.cos(ACT_TH) + Z * Math.sin(ACT_TH), rz = -X * Math.sin(ACT_TH) + Z * Math.cos(ACT_TH);
+    return [ox + rx * unit, oy - (Y * ACT_HEIGHT + rz * Math.sin(ACT_PH)) * unit];
   };
-  // 1) 보상: 실제(회색) vs 예측(노랑)
-  const [, rt, rh] = lanes[0];
-  const rAll = [...history.pred, ...history.real, ...(H ? imagined.reward : [])];
-  const rlo = Math.min(-1, ...rAll), rhi = Math.max(1, ...rAll);
-  const ry = (v) => rt + rh - 3 - ((v - rlo) / (rhi - rlo)) * (rh - 6);
-  ctx.strokeStyle = css("--line"); ctx.beginPath(); ctx.moveTo(labelW, ry(0)); ctx.lineTo(w, ry(0)); ctx.stroke();
-  line(history.real, hx, ry, css("--muted"));
-  line(history.pred, hx, ry, css("--accent"));
-  if (H) line([history.pred.length ? history.pred[history.pred.length - 1] : 0, ...imagined.reward], fx, ry, css("--accent"), [4, 3]);
-  // 2) 가치
-  const [, vt, vh] = lanes[1];
-  const vAll = [...history.value, ...(H ? imagined.value : [])];
-  if (vAll.length) {
-    const vlo = Math.min(...vAll), vhi = Math.max(...vAll, vlo + 1);
-    const vy = (v) => vt + vh - 3 - ((v - vlo) / (vhi - vlo)) * (vh - 6);
-    line(history.value, hx, vy, css("--loom"));
-    if (H) line(imagined.value, fx, vy, css("--loom"), [4, 3]);
+  // 후진(전진 < 0)은 바닥 뒤쪽 가장자리에 붙인다
+  const at = ([f, t, j]) => P(-t, (Math.max(0, f) - 0.5) * 2, j);
+
+  // 바닥과 방향 글자
+  ctx.beginPath();
+  for (const [X, Z] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) ctx.lineTo(...P(X, Z, -1));
+  ctx.closePath();
+  ctx.fillStyle = "rgba(138,145,162,0.08)"; ctx.fill();
+  ctx.strokeStyle = "rgba(138,145,162,0.55)"; ctx.lineWidth = 1; ctx.stroke();
+  ctx.font = "11px Segoe UI"; ctx.textAlign = "center"; ctx.fillStyle = css("--muted");
+  const label = (q, text, dy) => ctx.fillText(text, q[0], q[1] + dy);
+  label(P(-1.12, -1, -1), "turn left", 12);
+  label(P(1.12, -1, -1), "turn right", 12);
+  label(P(0, 1.15, -1), "forward", -3);
+  ctx.textAlign = "left";
+
+  const smooth = actHistory.map((_, i) => actAverage(actHistory, i)).slice(-ACT_TRAIL);
+  const cur = smooth.at(-1), head = at(cur), floor = at([cur[0], cur[1], -1]);
+
+  // 높이를 읽기 위한 기둥 + 바닥 그림자
+  ctx.strokeStyle = "rgba(138,145,162,0.7)"; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+  ctx.beginPath(); ctx.moveTo(...floor); ctx.lineTo(...head); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "rgba(138,145,162,0.45)";
+  ctx.beginPath(); ctx.ellipse(floor[0], floor[1], 6, 2.5, 0, 0, 2 * Math.PI); ctx.fill();
+
+  // 지나온 행동: 오래될수록 얇고 흐리게
+  ctx.lineCap = "round"; ctx.strokeStyle = rgb(PAL.real);
+  for (let i = 1; i < smooth.length; i++) {
+    const u = i / (smooth.length - 1);
+    ctx.globalAlpha = 0.1 + 0.6 * u * u;
+    ctx.lineWidth = (1 + 2.8 * u) * line;
+    ctx.beginPath(); ctx.moveTo(...at(smooth[i - 1])); ctx.lineTo(...at(smooth[i])); ctx.stroke();
   }
-  // 3) 놀람: 평소(중앙값)의 2배를 넘으면 빨강
-  const [, st, sh] = lanes[2];
-  const s = history.surprise;
-  if (s.length) {
-    const typical = [...s].sort((a, b) => a - b)[Math.floor(s.length / 2)];
-    const shi = Math.max(3, ...s);
-    const bw = Math.max(1.5, (split - labelW) / HISTORY);
-    s.forEach((v, i) => {
-      const x = labelW + ((i + HISTORY - s.length) / (HISTORY - 1)) * (split - labelW);
-      const bh = (v / shi) * (sh - 4);
-      ctx.fillStyle = v > 2 * typical + 0.5 ? "rgba(224,80,80,0.9)" : "rgba(138,145,162,0.45)";
-      ctx.fillRect(x - bw / 2, st + sh - 2 - bh, bw, bh);
-    });
+  ctx.globalAlpha = 1; ctx.lineCap = "butt";
+
+  // 상상한 앞으로의 행동: 새 상상이 나와도 선이 튀지 않게 조금씩 옮긴다
+  const target = actDreamTarget(imagined, lastStep);
+  if (!target) actDream = null;
+  else if (!actDream || snap) actDream = target.map((p) => [...p]);
+  else actDream = actDream.map((p, k) => p.map((v, c) => v + (target[k][c] - v) * 0.26));
+  if (actDream) {
+    ctx.strokeStyle = DREAM(0.9); ctx.lineWidth = 1.6 * line; ctx.lineJoin = "round";
+    ctx.beginPath(); ctx.moveTo(...head);
+    for (const p of actDream) ctx.lineTo(...at(p));
+    ctx.stroke();
+    const end = at(actDream.at(-1));
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(end[0], end[1], 3.5, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
   }
+
+  // 지금 점: 점프 출력이 0.5를 넘으면 점프 색(자홍)으로 크게
+  const [f0, t0, j0] = act.action;
+  const hot = j0 > 0.5;
+  ctx.fillStyle = rgb(hot ? PAL.jump : PAL.real); ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(head[0], head[1], (hot ? 7 : 5) * line, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+
+  const turnText = (t) => `${t >= 0 ? "+" : "−"}${Math.abs(t).toFixed(2)} (${Math.abs(t) < 0.05 ? "straight" : t > 0 ? "left" : "right"})`;
+  const jumpNote = !hot ? "" : act.cooldown ? " (cooldown)" : " (jumping)";
+  let text = `forward ${f0.toFixed(2)} · turn ${turnText(t0)} · jump ${j0.toFixed(2)}${jumpNote}`;
+  if (act.mode !== "brain" && act.brain) {
+    const b = act.brain;
+    text += ` · brain would: forward ${b[0].toFixed(2)} · turn ${turnText(b[1])} · jump ${b[2].toFixed(2)}`;
+  }
+  $("act-num").textContent = text;
+}
+
+function clearActionSpace() {
+  actHistory.length = 0;
+  actDream = null;
 }
 
 // 일시정지 중 믿음을 바꿨을 때: 복원 감각·z·상상·꿈속 뇌만 다시 그림 (시간 기록은 그대로)
@@ -599,14 +526,13 @@ function drawPreview(p) {
   pins = new Map(p.pins);
   if (rawOpen()) drawZ(p.z_probs, p.z_shape);
   drawPred(p.imagined);
-  drawTimeline(p.imagined);
   if (wmMap) drawStateMap(project(p.h, p.z), p.imagined);
-  drawActionMap(p.whatif, lastAct);
-  $("wm-num").textContent = `pred ${p.reward_pred.toFixed(2)} · value ${p.value.toFixed(1)} · continue ${(p.cont * 100).toFixed(0)}% (preview)`;
+  drawActionSpace(p.imagined, lastAct, { snap: true });
+  $("wm-num").innerHTML = `r̂<sub>t</sub> ${p.reward_pred.toFixed(2)} · v<sub>t</sub> ${p.value.toFixed(1)} · ĉ<sub>t</sub> ${(p.cont * 100).toFixed(0)}% (preview)`;
   if (viewMode !== "live" && lastRates) {
     brain.update(p.dream.rates, viewMode === "diff" ? { diffFrom: lastRates, clamped: [...clampedNow] } : { clamped: [...clampedNow] });
     const a = p.dream.action;
-    $("dream-info").textContent = `dream from now (step ${p.dream.originStep}) · end of rollout · forward ${a[0].toFixed(2)} turn ${a[1].toFixed(2)} jump ${a[2].toFixed(2)}`;
+    $("dream-info").textContent = `imagined from now (step ${p.dream.originStep}) · end of rollout · forward ${a[0].toFixed(2)} turn ${a[1].toFixed(2)} jump ${a[2].toFixed(2)}`;
   }
   updatePinInfo();
 }
@@ -646,14 +572,13 @@ function drawWM(wm) {
   if (rawOpen()) { drawH(); drawZ(wm.z_probs, wm.z_shape); }
   drawPred(wm.imagined);
   drawSurprise();
-  drawTimeline(wm.imagined);
   if (wmMap && wm.z) {
     const cur = project(wm.h, wm.z);
     mapTrail.push(cur);
     if (mapTrail.length > 60) mapTrail.shift();
     drawStateMap(cur, wm.imagined);
   }
-  $("wm-num").textContent = `pred ${wm.reward_pred.toFixed(2)} · actual ${wm.reward_real.toFixed(2)} · value ${wm.value.toFixed(1)} · continue ${(wm.cont * 100).toFixed(0)}%`;
+  $("wm-num").innerHTML = `predicted r̂<sub>t</sub> ${wm.reward_pred.toFixed(2)} · actual r<sub>t</sub> ${wm.reward_real.toFixed(2)} · v<sub>t</sub> ${wm.value.toFixed(1)} · ĉ<sub>t</sub> ${(wm.cont * 100).toFixed(0)}%`;
 }
 
 function drawSurprise() {
@@ -680,10 +605,10 @@ function drawSurprise() {
 }
 
 function drawWMPlaceholder() {
-  for (const id of ["h-heat", "z-grid", "pred-chart", "timeline", "state-map", "action-map"]) {
+  for (const id of ["h-heat", "z-grid", "pred-chart", "state-map", "action-space"]) {
     if (!$(id)) continue;
     const [ctx, w, h] = fitCanvas($(id));
-    ctx.fillStyle = "#0b0d11";
+    ctx.fillStyle = "#f7f8fa";
     ctx.fillRect(0, 0, w, h);
   }
 }
@@ -701,31 +626,36 @@ function onInit(msg) {
   });
   setupPerturb(msg);
 
-  $("legend").innerHTML = Object.entries(GROUP_LABELS)
-    .map(([k, label]) => `<span><i style="background:${rgb(GROUP_COLORS[k])}"></i>${label}</span>`)
-    .join("");
+  $("legend").innerHTML = LEGEND.map(([label, color]) => `<span><i style="background:${color}"></i>${label}</span>`).join("");
 
   // 하행뉴런·감각뉴런 막대는 legacy.html(서버)에만 있음
   const dnGroup = (i) => msg.group[msg.out_neurons[i]];
-  setDN = $("dn-bars") ? makeBars($("dn-bars"), msg.out_names, msg.out_neurons.map((_, i) => rgb(GROUP_COLORS[dnGroup(i)]))) : null;
+  setDN = $("dn-bars") ? makeBars($("dn-bars"), msg.out_names, msg.out_neurons.map((_, i) => GROUP_SWATCH[dnGroup(i)])) : null;
   const inKeys = ["in_odor_food", "in_odor_co2", "in_looming"];
   const inLabels = inKeys.flatMap((k) => [`${GROUP_LABELS[k]} L`, `${GROUP_LABELS[k]} R`]);
-  setIn = $("in-bars") ? makeBars($("in-bars"), inLabels, inKeys.flatMap((k) => [rgb(GROUP_COLORS[k]), rgb(GROUP_COLORS[k])])) : null;
+  setIn = $("in-bars") ? makeBars($("in-bars"), inLabels, inKeys.flatMap((k) => [GROUP_SWATCH[k], GROUP_SWATCH[k]])) : null;
   // 행동 막대는 legacy.html(서버)에만 있고, app.html은 행동 지도로 그림
-  setAct = $("act-bars") ? makeBars($("act-bars"), ["Forward", "Turn (+left)", "Jump"], [css("--accent"), css("--accent"), css("--bad")], true) : null;
+  setAct = $("act-bars") ? makeBars($("act-bars"), ["Forward", "Turn (+left)", "Jump"], [rgb(PAL.action), rgb(PAL.action), rgb(PAL.jump)], true) : null;
   setFood = makeLR($("o-food"), css("--food"));
   setCO2 = makeLR($("o-co2"), css("--co2"));
   // legacy.html(서버)에는 복원 감각용 막대가 따로 있고, app.html은 실제 막대에 눈금으로 겹쳐 그림
   setFoodR = $("r-food") ? makeLR($("r-food"), css("--food")) : null;
   setCO2R = $("r-co2") ? makeLR($("r-co2"), css("--co2")) : null;
   drawWMPlaceholder();
+  // app.html의 층 구조 화면: 화면 위 Real play / Imagination 전환을 3D 뇌 보기(Live / Dream)와 맞춘다
+  setupExplorer(msg, {
+    onMode: (m) => {
+      viewMode = m === "dream" ? "dream" : "live";
+      document.querySelectorAll("#brain-mode button").forEach((x) => x.classList.toggle("on", x.dataset.v === viewMode));
+    },
+  });
 }
 
 // ---------- 뉴런 조작 (브라우저 시뮬레이션에서만) ----------
 function setupPerturb(msg) {
   if (!$("group-ctl")) return;
   $("group-ctl").innerHTML = Object.entries(GROUP_LABELS).map(([k, label]) =>
-    `<span><i style="background:${rgb(GROUP_COLORS[k])}"></i>${label} <span class="muted">(${msg.groups[k].length})</span></span>` +
+    `<span><i style="background:${GROUP_SWATCH[k]}"></i>${label} <span class="muted">(${msg.groups[k].length})</span></span>` +
     `<button class="stim" data-g="${k}">Stimulate</button><button class="sil" data-g="${k}">Silence</button>`).join("");
   $("group-ctl").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
     const g = b.dataset.g, on = b.classList.contains("on");
@@ -825,8 +755,9 @@ function onFrame(f) {
   if (viewMode !== "live" && f.dream) {
     brain.update(f.dream.rates, viewMode === "diff" ? { diffFrom: rates, clamped } : { clamped });
     const a = f.dream.action;
-    $("dream-info").textContent = `dream started at step ${f.dream.originStep} (${f.dream.age} steps ago) · ` +
-      `imagined step +${f.dream.step}/${f.dream.of} · forward ${a[0].toFixed(2)} turn ${a[1].toFixed(2)} jump ${a[2].toFixed(2)}`;
+    $("dream-info").textContent = `imagination started at step ${f.dream.originStep} (${f.dream.age} steps ago) · ` +
+      `imagined step +${f.dream.step}/${f.dream.of} · forward ${a[0].toFixed(2)} turn ${a[1].toFixed(2)} jump ${a[2].toFixed(2)}` +
+      (viewMode === "diff" ? " · blue = more active when imagined, white = more active in real play" : "");
   } else {
     brain.update(rates, { clamped });
     if ($("dream-info")) $("dream-info").textContent = viewMode === "live" ? "" : "waiting for the first imagined rollout…";
@@ -844,11 +775,11 @@ function onFrame(f) {
   setCO2[0](f.obs[2]); setCO2[1](f.obs[3]);
   drawEyes(f.obs);
   if (setAct) f.action.forEach((v, i) => setAct[i](v));
-  if (lastAct && lastAct.episode !== f.episode) { actTrail.length = 0; actAdv = null; }   // 리셋 버튼 등으로 새 에피소드
-  lastAct = { action: f.action, brain: f.brain_action, mode: f.mode, episode: f.episode };
-  actTrail.push([f.action[1], f.action[0]]);
-  if (actTrail.length > 30) actTrail.shift();
-  drawActionMap(f.wm?.whatif, lastAct);
+  if (lastAct && lastAct.episode !== f.episode) clearActionSpace();   // 리셋 버튼 등으로 새 에피소드
+  lastAct = { action: f.action, brain: f.brain_action, mode: f.mode, episode: f.episode, cooldown: f.cooldown };
+  actHistory.push([...f.action]);
+  if (actHistory.length > ACT_TRAIL + 5) actHistory.shift();
+  drawActionSpace(f.wm?.imagined, lastAct);
   history.reward.push(f.reward); history.total.push(f.total);
   if (history.reward.length > HISTORY) { history.reward.shift(); history.total.shift(); }
   drawReward();
@@ -873,7 +804,8 @@ function onFrame(f) {
     $("events").prepend(li);
     while ($("events").children.length > 30) $("events").lastChild.remove();
   }
-  if (f.done) { for (const k in history) history[k].length = 0; mapTrail.length = 0; actTrail.length = 0; actAdv = null; }
+  explorerFrame(f, rates);
+  if (f.done) { for (const k in history) history[k].length = 0; mapTrail.length = 0; clearActionSpace(); }
 }
 
 // ---------- 연결 · 조작 ----------
