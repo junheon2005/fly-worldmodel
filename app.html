@@ -45,7 +45,7 @@
   <main class="explorer">
     <div class="left">
       <!-- 왼쪽 세로 한 칸: 월드모델과 뇌의 층 구조를 하나의 그림으로 (둘 사이 화살표가 끊기지 않게) -->
-      <div class="flow"><svg id="flow-svg" viewBox="0 0 360 640" role="img" aria-label="World model and fly brain layers with the senses and actions they exchange"></svg></div>
+      <div class="flow"><svg id="flow-svg" viewBox="0 0 360 594" role="img" aria-label="World model and fly brain layers with the senses and actions they exchange"></svg></div>
 
       <!-- 오른쪽 위: 월드모델 상세 화면 -->
       <section class="panel half wm">
@@ -102,29 +102,6 @@
                 <span class="muted" id="dream-info"></span>
               </div>
               <div class="legend" id="legend"></div>
-              <details id="perturb" class="fold">
-                <summary>Perturb neurons <span class="muted">(clamp membrane potential)</span> <span class="clamp-info" id="clamp-info"></span></summary>
-                <div class="ctl">
-                  <div id="picked" class="muted">Click a neuron in the 3D view to select it.</div>
-                  <div id="group-ctl" class="group-ctl"></div>
-                  <div class="ctl-row"><button id="unclamp">Release all</button></div>
-                  <label class="reflex"><input type="checkbox" id="reflex">
-                    <b>Reflex jump</b> — Giant Fiber firing above threshold triggers a jump (real fly circuit).
-                    <span class="muted">Experimental: not used in training; off = same behavior as the trained Python brain.</span></label>
-                </div>
-              </details>
-            </div>
-            <div class="view" id="brv-action" hidden>
-              <h3>Action path <span class="muted">· brain's output a<sub>t</sub>: floor = turn × forward, height = jump</span></h3>
-              <canvas id="action-space" height="300"></canvas>
-              <div class="legend">
-                <span><i style="background:var(--real)"></i>now</span>
-                <span><i style="background:rgba(27,30,38,.45)"></i>recent path (12 steps)</span>
-                <span><i style="background:var(--dream)"></i>imagined next steps</span>
-                <span><i style="background:var(--jump)"></i>jump output above 0.5</span>
-              </div>
-              <div class="act-num" id="act-num"></div>
-              <div class="muted act-note" id="act-note">(chosen at this state, applied on the next step)</div>
             </div>
             <div class="view" id="brv-layer" hidden>
               <div id="brl-head"></div>

@@ -153,29 +153,16 @@ canvas { width: 100%; display: block; }
 /* 뇌 보기 전환 · 뉴런 조작 (app.html) */
 .brain-bar { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
 .seg.small button { padding: 2px 8px; font-size: 12px; }
-.ctl { display: grid; gap: 6px; font-size: 12px; }
-.ctl button { padding: 2px 8px; font-size: 12px; }
-.ctl-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.group-ctl { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 6px; align-items: center; }
-.group-ctl i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
-button.stim.on { background: var(--real); color: #fff; border-color: var(--real); }
-button.sil.on { background: #8a919e; color: #fff; border-color: #8a919e; }
 .ghost-toggle { display: block; margin-top: 8px; font-size: 12px; }
 .ghost-key { display: inline-block; width: 18px; border-top: 2px dashed var(--dream); vertical-align: middle; margin: 0 4px; }
 
 /* 가운데 패널: 상태 지도 · 접기 */
 #state-map { border-radius: 8px; background: #fafbfc; border: 1px solid var(--line); }
-#action-space { border-radius: 8px; background: #fafbfc; border: 1px solid var(--line); aspect-ratio: 1.7 / 1; max-height: 240px; }
-.act-num { margin-top: 6px; font-size: 12px; font-variant-numeric: tabular-nums; }
-.act-note { font-size: 11px; }
 /* 접었다 펴는 영역 (뉴런 조작) */
 details.fold { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 6px; }
 details.fold summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; }
 details.fold[open] summary { margin-bottom: 6px; }
-.clamp-info { margin-left: 6px; color: var(--muted); font-weight: 400; }
 .lr .tick { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--dream); border-radius: 1px; }   /* 월드모델이 복원한 값 */
-.reflex { display: block; font-size: 12px; line-height: 1.5; margin-top: 4px; }
-.reflex input { vertical-align: -2px; margin-right: 4px; }
 /* app.html 탐색 화면: 오른쪽 1/3 게임, 왼쪽 2/3을 위(월드모델)·아래(뇌)로 나누고, 각 절반은 상세 화면 + 층 구조 그림 */
 main.explorer { grid-template-columns: 2fr 1fr; }
 /* 왼쪽 2/3: [층 구조 그림 한 칸(위아래 전체)] [월드모델 상세(위) / 뇌 상세(아래)] */
@@ -192,7 +179,6 @@ main.explorer { grid-template-columns: 2fr 1fr; }
 .view.fill:not([hidden]) { display: flex; flex-direction: column; height: 100%; }
 .explorer #brain-view { aspect-ratio: auto; flex: 1; min-height: 180px; }
 .explorer #state-map { height: 260px; }
-.explorer #action-space { max-height: 220px; }
 .xd-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
 .xd-head .muted { font-size: 12px; }
 .xd-title { font-weight: 600; font-size: 13px; }
@@ -201,15 +187,11 @@ main.explorer { grid-template-columns: 2fr 1fr; }
 .xd-note { font-size: 12px; line-height: 1.5; color: var(--muted); margin-top: 4px; }
 .xd-hov { font-size: 12px; color: var(--muted); min-height: 18px; }
 .xd-sense { margin: 6px 0 4px; }
-.xd-scroll { overflow-x: auto; margin-top: 6px; }
-.xd-table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
-.xd-table th { font-weight: 600; text-align: right; padding: 2px 10px; }
-.xd-table th:first-child, .xd-table td:first-child { text-align: left; padding-left: 0; color: var(--text); }
-.xd-table td { text-align: right; padding: 2px 10px; }
 #wml-canvas, #brl-canvas { margin-top: 6px; }
 /* 계산 화면: 단계 버튼, 수식 */
 .xd-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 2px; }
 .xd-steps:empty { display: none; }
+.xd-steps svg { display: block; height: auto; max-width: 100%; }
 .xd-steps button { padding: 1px 9px; font-size: 11.5px; border-radius: 11px; }
 .xd-steps button.on { background: var(--real); color: #fff; border-color: var(--real); }
 .xd-tex { font-size: 12.5px; min-height: 20px; margin: 3px 0 0; white-space: nowrap; overflow: hidden; color: var(--text); }
@@ -225,12 +207,11 @@ main.explorer { grid-template-columns: 2fr 1fr; }
 }
 
 /* 스크롤바 없이 한 화면에: 칸 안의 그림은 남은 높이에 맞춰 그리고(explorer.js), 스크롤바는 숨긴다 */
-.panel, .detail, .xd-scroll, .flow { scrollbar-width: none; }
-.panel::-webkit-scrollbar, .detail::-webkit-scrollbar, .xd-scroll::-webkit-scrollbar, .flow::-webkit-scrollbar { display: none; }
-#wmv-statemap:not([hidden]), #brv-action:not([hidden]) { display: flex; flex-direction: column; height: 100%; }
+.panel, .detail, .flow { scrollbar-width: none; }
+.panel::-webkit-scrollbar, .detail::-webkit-scrollbar, .flow::-webkit-scrollbar { display: none; }
+#wmv-statemap:not([hidden]) { display: flex; flex-direction: column; height: 100%; }
 #wmv-statemap .wm-block { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .explorer #state-map { flex: 1 1 0; min-height: 120px; height: auto; }
-.explorer #action-space { flex: 1 1 0; min-height: 120px; max-height: none; aspect-ratio: auto; }
 .explorer > .panel.game { display: flex; flex-direction: column; overflow: hidden; }
 .explorer #game { width: min(100%, calc(100vh - 330px)); height: auto; margin: 0 auto; }
 .explorer #events { flex: 1; min-height: 0; overflow: hidden; }
@@ -239,10 +220,11 @@ main.explorer { grid-template-columns: 2fr 1fr; }
 .explorer #reward-chart { height: 56px; }
 .explorer #eyes { height: 26px; }
 /* 낮은 화면: explorer.js tighten()이 단계를 정한다 */
-.detail[data-tight="1"] .xd-note, .detail[data-tight="2"] .xd-note { display: none; }
-.detail[data-tight="2"] .xd-text, .detail[data-tight="2"] .xd-formula { font-size: 11px; line-height: 1.4; margin-bottom: 2px; }
-.detail[data-tight="2"] .xd-sense .legend { display: none; }
-.detail[data-tight="2"] .xd-table tbody tr:nth-child(n+4) { display: none; }
+.detail[data-tight="1"] .xd-note, .detail[data-tight="2"] .xd-note, .detail[data-tight="3"] .xd-note { display: none; }
+.detail[data-tight="2"] .xd-text, .detail[data-tight="2"] .xd-formula, .detail[data-tight="3"] .xd-formula { font-size: 11px; line-height: 1.4; margin-bottom: 2px; }
+.detail[data-tight="2"] .xd-sense .legend, .detail[data-tight="3"] .xd-sense .legend { display: none; }
+/* 3단계: 그래도 모자라면 설명 글을 숨긴다 (수식·그림은 남김) */
+.detail[data-tight="3"] .xd-text { display: none; }
 
 .legacy-banner { background: #3a2a10; color: #f0c850; font-size: 12px; padding: 6px 16px; border-bottom: 1px solid #5a4318; }
 .legacy-banner code { background: rgba(0,0,0,.3); padding: 0 4px; border-radius: 3px; }

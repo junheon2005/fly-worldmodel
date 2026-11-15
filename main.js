@@ -13,9 +13,6 @@ let ws = null;
 let local = null;     // 브라우저 안에서 돌 때의 LocalSession
 const history = { reward: [], total: [], h: [], pred: [], real: [], value: [], surprise: [] };
 let viewMode = "live";          // 뇌 보기: live(실제) / dream(꿈) / diff(꿈 − 실제)
-let picked = null;              // 3D에서 클릭한 뉴런
-let clampedNow = new Map();     // 지금 강제로 켜고 끈 뉴런 → 막전위
-const STIM = 2.0, SILENCE = -2.0;
 let pins = new Map();           // 월드모델 믿음 고정: z 범주 → 칸
 let zLayout = null;             // z 격자 칸 크기 (클릭 위치 계산용)
 let lastRates = null;           // 마지막 실제 뇌 발화율 (일시정지 중 비교용)
@@ -400,126 +397,6 @@ function mapLegend() {
     `<span class="muted">axes explain ${(100 * (wmMap.explained[0] + wmMap.explained[1])).toFixed(0)}% of state variance</span>`;
 }
 
-// ---------- 행동 궤적 (3D): 뇌가 내놓은 행동 3개를 그대로 좌표로 ----------
-// 바닥 = 회전(왼쪽 +1) × 전진, 높이 = 점프 출력. 지나온 행동은 보라색 꼬리, 상상한 앞으로의 행동은 하늘색 선.
-// 회전은 스텝마다 부호가 뒤집히는 일이 많아(지그재그) 위치는 짧은 이동평균으로 그린다.
-// 현재 점의 색만 평균 없이 이번 스텝의 점프 출력을 쓴다 (0.5 초과 = 빨강, 쿨다운과 무관).
-const ACT_TRAIL = 12, ACT_DREAM_POINTS = 8;
-const ACT_WINDOW = [3, 5, 3];         // 이동평균 길이: 전진, 회전, 점프
-const ACT_TH = (35 * Math.PI) / 180, ACT_PH = 0.3;    // 고정 카메라 (좌우 회전, 내려다보는 각)
-const ACT_HEIGHT = 0.45;              // 점프 축을 화면에 그리는 비율 (납작하게 해서 위아래 빈 공간을 줄임)
-const actHistory = [];                // 최근 실제 행동 [전진, 회전, 점프]
-let actDream = null;                  // 화면에 보이는 상상 선 (새 상상 쪽으로 천천히 옮겨 감)
-let lastAct = null;                   // 마지막 프레임의 행동 (일시정지 미리보기용)
-
-function actAverage(seq, i) {
-  return ACT_WINDOW.map((k, c) => {
-    const from = Math.max(0, i - k + 1);
-    let sum = 0;
-    for (let j = from; j <= i; j++) sum += seq[j][c];
-    return sum / (i - from + 1);
-  });
-}
-
-// 상상 궤적에서 지금(step) 이후의 행동만 골라, 실제 행동과 이어지게 평균 낸 뒤 일정 개수로 줄인다.
-// action[k]는 상태 originStep + k에서 고른 행동이다.
-function actDreamTarget(imagined, step) {
-  if (!imagined?.action?.length || imagined.originStep == null || step == null) return null;
-  const future = imagined.action.slice(Math.max(0, step - imagined.originStep + 1));
-  if (!future.length) return null;
-  const seq = [...actHistory.slice(-4), ...future], base = seq.length - future.length;
-  const smooth = future.map((_, k) => actAverage(seq, base + k));
-  return Array.from({ length: ACT_DREAM_POINTS }, (_, k) =>
-    smooth[Math.round((k * (smooth.length - 1)) / (ACT_DREAM_POINTS - 1))]);
-}
-
-function drawActionSpace(imagined, act, { snap = false } = {}) {
-  const c = $("action-space");
-  if (!c || !act || !actHistory.length || !c.clientWidth) return;   // 숨겨진 상태면 그리지 않음
-  const [ctx, w, h] = fitCanvas(c);
-  ctx.clearRect(0, 0, w, h);
-  // 행동 공간 전체(점프 최대까지)가 캔버스에 딱 맞게. 위 여백은 점 크기, 아래 여백은 글자 자리, 1.5는 왼쪽 글자 위치
-  const padT = 10, padB = 18;
-  const extent = Math.cos(ACT_TH) + Math.sin(ACT_TH), halfV = ACT_HEIGHT + extent * Math.sin(ACT_PH);
-  const unit = Math.min((w / 2 - 24) / 1.5, (h - padT - padB) / (2 * halfV));
-  const line = Math.max(1, Math.min(1.5, unit / 82));
-  const ox = w / 2, oy = padT + (h - padT - padB) / 2;
-  const P = (X, Z, Y) => {
-    const rx = X * Math.cos(ACT_TH) + Z * Math.sin(ACT_TH), rz = -X * Math.sin(ACT_TH) + Z * Math.cos(ACT_TH);
-    return [ox + rx * unit, oy - (Y * ACT_HEIGHT + rz * Math.sin(ACT_PH)) * unit];
-  };
-  // 후진(전진 < 0)은 바닥 뒤쪽 가장자리에 붙인다
-  const at = ([f, t, j]) => P(-t, (Math.max(0, f) - 0.5) * 2, j);
-
-  // 바닥과 방향 글자
-  ctx.beginPath();
-  for (const [X, Z] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) ctx.lineTo(...P(X, Z, -1));
-  ctx.closePath();
-  ctx.fillStyle = "rgba(138,145,162,0.08)"; ctx.fill();
-  ctx.strokeStyle = "rgba(138,145,162,0.55)"; ctx.lineWidth = 1; ctx.stroke();
-  ctx.font = "11px Segoe UI"; ctx.textAlign = "center"; ctx.fillStyle = css("--muted");
-  const label = (q, text, dy) => ctx.fillText(text, q[0], q[1] + dy);
-  label(P(-1.12, -1, -1), "turn left", 12);
-  label(P(1.12, -1, -1), "turn right", 12);
-  label(P(0, 1.15, -1), "forward", -3);
-  ctx.textAlign = "left";
-
-  const smooth = actHistory.map((_, i) => actAverage(actHistory, i)).slice(-ACT_TRAIL);
-  const cur = smooth.at(-1), head = at(cur), floor = at([cur[0], cur[1], -1]);
-
-  // 높이를 읽기 위한 기둥 + 바닥 그림자
-  ctx.strokeStyle = "rgba(138,145,162,0.7)"; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
-  ctx.beginPath(); ctx.moveTo(...floor); ctx.lineTo(...head); ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle = "rgba(138,145,162,0.45)";
-  ctx.beginPath(); ctx.ellipse(floor[0], floor[1], 6, 2.5, 0, 0, 2 * Math.PI); ctx.fill();
-
-  // 지나온 행동: 오래될수록 얇고 흐리게
-  ctx.lineCap = "round"; ctx.strokeStyle = rgb(PAL.real);
-  for (let i = 1; i < smooth.length; i++) {
-    const u = i / (smooth.length - 1);
-    ctx.globalAlpha = 0.1 + 0.6 * u * u;
-    ctx.lineWidth = (1 + 2.8 * u) * line;
-    ctx.beginPath(); ctx.moveTo(...at(smooth[i - 1])); ctx.lineTo(...at(smooth[i])); ctx.stroke();
-  }
-  ctx.globalAlpha = 1; ctx.lineCap = "butt";
-
-  // 상상한 앞으로의 행동: 새 상상이 나와도 선이 튀지 않게 조금씩 옮긴다
-  const target = actDreamTarget(imagined, lastStep);
-  if (!target) actDream = null;
-  else if (!actDream || snap) actDream = target.map((p) => [...p]);
-  else actDream = actDream.map((p, k) => p.map((v, c) => v + (target[k][c] - v) * 0.26));
-  if (actDream) {
-    ctx.strokeStyle = DREAM(0.9); ctx.lineWidth = 1.6 * line; ctx.lineJoin = "round";
-    ctx.beginPath(); ctx.moveTo(...head);
-    for (const p of actDream) ctx.lineTo(...at(p));
-    ctx.stroke();
-    const end = at(actDream.at(-1));
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath(); ctx.arc(end[0], end[1], 3.5, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
-  }
-
-  // 지금 점: 점프 출력이 0.5를 넘으면 점프 색(자홍)으로 크게
-  const [f0, t0, j0] = act.action;
-  const hot = j0 > 0.5;
-  ctx.fillStyle = rgb(hot ? PAL.jump : PAL.real); ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.arc(head[0], head[1], (hot ? 7 : 5) * line, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
-
-  const turnText = (t) => `${t >= 0 ? "+" : "−"}${Math.abs(t).toFixed(2)} (${Math.abs(t) < 0.05 ? "straight" : t > 0 ? "left" : "right"})`;
-  const jumpNote = !hot ? "" : act.cooldown ? " (cooldown)" : " (jumping)";
-  let text = `forward ${f0.toFixed(2)} · turn ${turnText(t0)} · jump ${j0.toFixed(2)}${jumpNote}`;
-  if (act.mode !== "brain" && act.brain) {
-    const b = act.brain;
-    text += ` · brain would: forward ${b[0].toFixed(2)} · turn ${turnText(b[1])} · jump ${b[2].toFixed(2)}`;
-  }
-  $("act-num").textContent = text;
-}
-
-function clearActionSpace() {
-  actHistory.length = 0;
-  actDream = null;
-}
-
 // 일시정지 중 믿음을 바꿨을 때: 복원 감각·z·상상·꿈속 뇌만 다시 그림 (시간 기록은 그대로)
 function drawPreview(p) {
   showRecon(p.recon);
@@ -527,10 +404,9 @@ function drawPreview(p) {
   if (rawOpen()) drawZ(p.z_probs, p.z_shape);
   drawPred(p.imagined);
   if (wmMap) drawStateMap(project(p.h, p.z), p.imagined);
-  drawActionSpace(p.imagined, lastAct, { snap: true });
   $("wm-num").innerHTML = `r̂<sub>t</sub> ${p.reward_pred.toFixed(2)} · v<sub>t</sub> ${p.value.toFixed(1)} · ĉ<sub>t</sub> ${(p.cont * 100).toFixed(0)}% (preview)`;
   if (viewMode !== "live" && lastRates) {
-    brain.update(p.dream.rates, viewMode === "diff" ? { diffFrom: lastRates, clamped: [...clampedNow] } : { clamped: [...clampedNow] });
+    brain.update(p.dream.rates, viewMode === "diff" ? { diffFrom: lastRates } : {});
     const a = p.dream.action;
     $("dream-info").textContent = `imagined from now (step ${p.dream.originStep}) · end of rollout · forward ${a[0].toFixed(2)} turn ${a[1].toFixed(2)} jump ${a[2].toFixed(2)}`;
   }
@@ -605,7 +481,7 @@ function drawSurprise() {
 }
 
 function drawWMPlaceholder() {
-  for (const id of ["h-heat", "z-grid", "pred-chart", "state-map", "action-space"]) {
+  for (const id of ["h-heat", "z-grid", "pred-chart", "state-map"]) {
     if (!$(id)) continue;
     const [ctx, w, h] = fitCanvas($(id));
     ctx.fillStyle = "#f7f8fa";
@@ -620,11 +496,8 @@ function onInit(msg) {
   init = msg;
   $("brain-info").textContent = `${msg.n.toLocaleString()} neurons · ${msg.trained ? "trained" : "untrained"}`;
   $("brain-view").querySelector("canvas")?.remove();
-  // 3D에서 뉴런을 고르면 접혀 있던 뉴런 조작 영역을 펼침
-  brain = createBrainView($("brain-view"), $("tooltip"), msg, {
-    onPick: (i) => { picked = i; if ($("perturb")) $("perturb").open = true; renderPicked(); },
-  });
-  setupPerturb(msg);
+  brain = createBrainView($("brain-view"), $("tooltip"), msg);
+  setupControls();
 
   $("legend").innerHTML = LEGEND.map(([label, color]) => `<span><i style="background:${color}"></i>${label}</span>`).join("");
 
@@ -651,18 +524,8 @@ function onInit(msg) {
   });
 }
 
-// ---------- 뉴런 조작 (브라우저 시뮬레이션에서만) ----------
-function setupPerturb(msg) {
-  if (!$("group-ctl")) return;
-  $("group-ctl").innerHTML = Object.entries(GROUP_LABELS).map(([k, label]) =>
-    `<span><i style="background:${GROUP_SWATCH[k]}"></i>${label} <span class="muted">(${msg.groups[k].length})</span></span>` +
-    `<button class="stim" data-g="${k}">Stimulate</button><button class="sil" data-g="${k}">Silence</button>`).join("");
-  $("group-ctl").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
-    const g = b.dataset.g, on = b.classList.contains("on");
-    send("clamp", { neurons: init.groups[g], v: on ? null : (b.classList.contains("stim") ? STIM : SILENCE) });
-    $("group-ctl").querySelectorAll(`[data-g="${g}"]`).forEach((x) => x.classList.remove("on"));
-    if (!on) b.classList.add("on");
-  }));
+// ---------- 버튼 연결: 3D 뇌 보기 전환, (legacy.html) 믿음 고정 ----------
+function setupControls() {
   // z 격자 클릭 → 그 범주의 믿음을 그 칸으로 고정 (같은 칸 다시 클릭하면 해제)
   $("z-grid")?.addEventListener("click", async (e) => {
     if (!zLayout || !local) return;
@@ -703,36 +566,9 @@ function setupPerturb(msg) {
     updatePinInfo();
     if (paused) { const p = await local.preview(); if (p) drawPreview(p); }
   });
-  $("unclamp").addEventListener("click", () => {
-    send("unclamp_all");
-    $("group-ctl").querySelectorAll("button").forEach((x) => x.classList.remove("on"));
-    clampedNow.clear();
-    renderPicked();
-  });
   document.querySelectorAll("#brain-mode button").forEach((b) => b.addEventListener("click", () => {
     viewMode = b.dataset.v;
     document.querySelectorAll("#brain-mode button").forEach((x) => x.classList.toggle("on", x === b));
-  }));
-}
-
-function renderPicked() {
-  if (picked == null || !$("picked")) return;
-  const i = picked, v = clampedNow.get(i);
-  const type = init.cell_type[i];
-  const same = type ? init.cell_type.reduce((a, t, j) => (t === type ? (a.push(j), a) : a), []) : [i];
-  const state = v == null ? "" : v > 0 ? " · <b>stimulated</b>" : " · <b>silenced</b>";
-  $("picked").innerHTML =
-    `<div><b>${type || "(unnamed)"}</b> · ${init.side[i]} · ${init.super_class[i]} · #${i}${state}</div>` +
-    `<div class="ctl-row"><button data-a="stim">Stimulate</button><button data-a="sil">Silence</button>` +
-    `<button data-a="rel">Release</button>` +
-    (same.length > 1 ? `<button data-a="type">Stimulate all ${same.length} ${type}</button>` : "") + `</div>`;
-  $("picked").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
-    const a = b.dataset.a;
-    const neurons = a === "type" ? same : [i];
-    const val = a === "stim" || a === "type" ? STIM : a === "sil" ? SILENCE : null;
-    send("clamp", { neurons, v: val });
-    neurons.forEach((j) => (val == null ? clampedNow.delete(j) : clampedNow.set(j, val)));
-    renderPicked();
   }));
 }
 
@@ -750,19 +586,16 @@ function onFrame(f) {
   lastStep = f.step;
   recentEye = [...recentEye, Math.max(...f.obs.slice(4))].slice(-10);
   // 뇌 보기: 실제 / 꿈(상상 중 뇌 활동) / 꿈 − 실제
-  const clamped = f.clamped || [];
-  clampedNow = new Map(clamped);
   if (viewMode !== "live" && f.dream) {
-    brain.update(f.dream.rates, viewMode === "diff" ? { diffFrom: rates, clamped } : { clamped });
+    brain.update(f.dream.rates, viewMode === "diff" ? { diffFrom: rates } : {});
     const a = f.dream.action;
     $("dream-info").textContent = `imagination started at step ${f.dream.originStep} (${f.dream.age} steps ago) · ` +
       `imagined step +${f.dream.step}/${f.dream.of} · forward ${a[0].toFixed(2)} turn ${a[1].toFixed(2)} jump ${a[2].toFixed(2)}` +
       (viewMode === "diff" ? " · blue = more active when imagined, white = more active in real play" : "");
   } else {
-    brain.update(rates, { clamped });
+    brain.update(rates);
     if ($("dream-info")) $("dream-info").textContent = viewMode === "live" ? "" : "waiting for the first imagined rollout…";
   }
-  if ($("clamp-info")) $("clamp-info").textContent = clamped.length ? `${clamped.length.toLocaleString()} neurons clamped` : "";
   if (setDN) init.out_neurons.forEach((n, i) => setDN[i](rates[n] / 255));
   if (setIn) {
     let j = 0;
@@ -775,17 +608,10 @@ function onFrame(f) {
   setCO2[0](f.obs[2]); setCO2[1](f.obs[3]);
   drawEyes(f.obs);
   if (setAct) f.action.forEach((v, i) => setAct[i](v));
-  if (lastAct && lastAct.episode !== f.episode) clearActionSpace();   // 리셋 버튼 등으로 새 에피소드
-  lastAct = { action: f.action, brain: f.brain_action, mode: f.mode, episode: f.episode, cooldown: f.cooldown };
-  actHistory.push([...f.action]);
-  if (actHistory.length > ACT_TRAIL + 5) actHistory.shift();
-  drawActionSpace(f.wm?.imagined, lastAct);
   history.reward.push(f.reward); history.total.push(f.total);
   if (history.reward.length > HISTORY) { history.reward.shift(); history.total.shift(); }
   drawReward();
   $("reward-num").textContent = `on arriving at step ${f.step}: ${f.reward >= 0 ? "+" : ""}${f.reward.toFixed(3)}`;
-  if ($("act-note")) $("act-note").textContent = f.actionApplied === false
-    ? "(episode ended at this state — not applied)" : "(chosen at this state, applied on the next step)";
   $("wm-empty").style.display = f.wm ? "none" : "flex";
   if (f.wm) drawWM(f.wm);
 
@@ -805,7 +631,7 @@ function onFrame(f) {
     while ($("events").children.length > 30) $("events").lastChild.remove();
   }
   explorerFrame(f, rates);
-  if (f.done) { for (const k in history) history[k].length = 0; mapTrail.length = 0; clearActionSpace(); }
+  if (f.done) { for (const k in history) history[k].length = 0; mapTrail.length = 0; }
 }
 
 // ---------- 연결 · 조작 ----------
@@ -839,7 +665,6 @@ $("reset").addEventListener("click", () => send("reset"));
 $("speed").addEventListener("change", (e) => send("speed", e.target.value));
 $("level").addEventListener("change", (e) => send("level", e.target.value));
 $("ghost")?.addEventListener("change", (e) => send("ghost", e.target.checked));
-$("reflex")?.addEventListener("change", (e) => send("reflex", e.target.checked));
 
 const KEYMAP = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", " ": "space" };
 const keys = {};
