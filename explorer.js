@@ -16,8 +16,9 @@ const SUPER_NAMES = {
   sensory: "Other sensory", sensory_ascending: "Sensory ascending", visual_centrifugal: "Visual centrifugal",
   visual_projection: "Visual projection", "": "Unknown",
 };
-const TEAL = { f: "#EAF7F2", s: "#0F6E56", t: "#085041", u: "#2f7d68", in: "#ffffff" };
-const PUR = { f: "#F1F0FD", s: "#534AB7", t: "#3C3489", u: "#5d55b8", in: "#ffffff" };
+// f = 틀 바탕, in = 상자 바탕(틀보다 조금 진하게), s = 선, t = 제목, u = 부제
+const TEAL = { f: "#EAF7F2", s: "#0F6E56", t: "#085041", u: "#2f7d68", in: "#D3EEE3" };
+const PUR = { f: "#F1F0FD", s: "#534AB7", t: "#3C3489", u: "#5d55b8", in: "#E3E0FA" };
 // 색 규칙은 palette.js: 실제 = 검정, 월드모델이 만든 것(상상) = 파랑, 감각 = 초록·노랑·빨강, 걷기 = 주황, 점프 = 자홍.
 // 값의 크기만 나타내는 칸은 색 없이 회색 농도로 그린다. 보라(월드모델)·청록(뇌)은 틀과 상자에만 쓴다.
 const DIM = "#aab0bc", INK = rgb(PAL.real), SUB = "#646b7a", EDGE = "#cfd4dc";
@@ -57,29 +58,58 @@ function defs(svg) {
 function arrow(svg, d, color = DIM) {
   return el("path", { d, fill: "none", stroke: color, "stroke-width": 1.2, "marker-end": `url(#${svg.id}-ar)` }, svg);
 }
-// 층 상자: 제목, 부제, 값. 모두 가운데 정렬
-function box(svg, { x, y, w, h, c, title, sub }, onClick) {
+// 층 상자 (옅은 색 바탕): 제목과 부제, 가운데 정렬
+// shape: 사다리꼴 폭 = 차원. "widen" = 아래로 넓어짐 (인코더 o_t 36 → e_t 256),
+//        "narrow" = 아래로 좁아짐 (출력 머리 [h_t; z_t] 512 → ô_t 36, r̂_t 1)
+function box(svg, { x, y, w, h, c, title, sub, shape }, onClick) {
   const g = el("g", { style: "cursor:pointer" }, svg);
-  const rect = el("rect", { x, y, width: w, height: h, rx: 7, fill: c.in, stroke: c.s, "stroke-width": 0.8 }, g);
-  text(g, x + w / 2, y + 18, title, { size: 12.5, w: 600, fill: c.t });
-  text(g, x + w / 2, y + 33, sub, { size: 10, fill: c.u });
-  const val = text(g, x + w / 2, y + 49, "", { size: 10.5, fill: c.t });
+  const st = { fill: c.in, stroke: c.s, "stroke-width": 0.8, "stroke-linejoin": "round" };
+  const d = w * 0.12, [t0, t1, b0, b1] = shape === "narrow" ? [x, x + w, x + d, x + w - d] : shape === "widen" ? [x + d, x + w - d, x, x + w] : [];
+  const sh = shape === "narrow" ? -3 : 0;   // 아래가 좁으면 부제가 비스듬한 변에 닿지 않게 글자를 조금 올림
+  const rect = shape ? el("polygon", { points: `${t0},${y} ${t1},${y} ${b1},${y + h} ${b0},${y + h}`, ...st }, g)
+                     : el("rect", { x, y, width: w, height: h, rx: 3, ...st }, g);
+  text(g, x + w / 2, y + h / 2 - 3 + sh, title, { size: 14, w: 600, fill: c.t });
+  const subEl = text(g, x + w / 2, y + h / 2 + 13 + sh, sub, { size: 11, fill: c.u });
   g.addEventListener("click", onClick);
-  return { g, rect, val, w, c };
+  return { g, rect, sub: subEl, w, c };
 }
-function tile(svg, { x, y, w, h, title, sub }, onClick) {
+// 회색 칸 (State map · Brain map 3D): 제목과 부제 몇 줄. 높이는 글자에 맞춘다
+function tile(svg, { x, y, w, title, sub }, onClick) {
   const g = el("g", { style: "cursor:pointer" }, svg);
-  const rect = el("rect", { x, y, width: w, height: h, rx: 7, fill: "#f7f8fa", stroke: EDGE, "stroke-width": 0.9 }, g);
-  text(g, x + 10, y + 16, title, { a: "start", size: 12, w: 600 });
-  text(g, x + 10, y + 30, sub, { a: "start", size: 10, fill: SUB });
+  const h = 32 + 12 * (sub.length - 1) + 10;
+  const rect = el("rect", { x, y, width: w, height: h, rx: 3, fill: "#f7f8fa", stroke: EDGE, "stroke-width": 0.9 }, g);
+  text(g, x + 8, y + 17, title, { a: "start", size: 12, w: 600 });
+  sub.forEach((line, i) => text(g, x + 8, y + 32 + 12 * i, line, { a: "start", size: 9.5, fill: SUB }));
   g.addEventListener("click", onClick);
   return { g, rect, tile: true };
 }
-// 여러 줄 글자 (하나의 <g>로 묶어 투명도를 함께 바꿈)
-function lines(svg, x, y, rows, anchor) {
-  const g = el("g", {}, svg);
-  rows.forEach((r, i) => text(g, x, y + i * 11, r, { a: anchor, size: 9.5, fill: SUB }));
+// Middle: 상자 안에 작은 순환 신경망 그림, 이름과 설명은 상자 오른쪽에
+function netBox(svg, { x, y, w, h, c, title, sub }, onClick) {
+  const g = el("g", { style: "cursor:pointer" }, svg);
+  const rect = el("rect", { x, y, width: w, height: h, rx: 3, fill: c.in, stroke: c.s, "stroke-width": 0.8 }, g);
+  const cx = x + w / 2, cy = y + h / 2;
+  const N = [[-30, -9], [-30, 9], [-11, -14], [-11, 0], [-11, 14], [10, -9], [10, 9], [30, 0]];
+  const E = [[0, 2], [0, 3], [1, 3], [1, 4], [2, 5], [3, 5], [3, 6], [4, 6], [5, 7], [6, 7], [2, 3], [5, 6], [6, 3], [7, 5]];
+  for (const [a, b] of E) el("line", { x1: cx + N[a][0], y1: cy + N[a][1], x2: cx + N[b][0], y2: cy + N[b][1], stroke: c.u, "stroke-width": 0.7 }, g);
+  for (const [dx, dy] of N) el("circle", { cx: cx + dx, cy: cy + dy, r: 3.6, fill: "#ffffff", stroke: c.s, "stroke-width": 0.9 }, g);
+  text(g, x + w + 8, y + 16, title, { a: "start", size: 14, w: 600, fill: c.t });
+  sub.forEach((line, i) => text(g, x + w + 8, y + 31 + i * 12, line, { a: "start", size: 10.5, fill: c.u }));
+  g.addEventListener("click", onClick);
+  return { g, rect, w, c };
+}
+// 출력 값 꼬리표: 월드모델이 만든 값이라 파랑 (palette.js 규칙)
+function tag(svg, x, y, w, s, onClick) {
+  const g = el("g", { style: "cursor:pointer" }, svg);
+  el("rect", { x, y, width: w, height: 17, rx: 3, fill: rgb(PAL.dream, 0.08), stroke: rgb(PAL.dream, 0.5), "stroke-width": 0.8 }, g);
+  text(g, x + w / 2, y + 12.5, s, { size: 12, fill: rgb(PAL.dream) });
+  g.addEventListener("click", onClick);
   return g;
+}
+// 위로 뾰족한 중괄호 (상자 하나에서 나오는 여러 값을 묶음)
+function braceUp(svg, y, x1, x2, color) {
+  const m = (x1 + x2) / 2;
+  el("path", { fill: "none", stroke: color, "stroke-width": 0.9,
+    d: `M${x1} ${y + 7} Q${x1} ${y + 3} ${x1 + 5} ${y + 3} H${m - 5} Q${m} ${y + 3} ${m} ${y - 1} Q${m} ${y + 3} ${m + 5} ${y + 3} H${x2 - 5} Q${x2} ${y + 3} ${x2} ${y + 7}` }, svg);
 }
 function setPort(p, on, ghost = false) {
   p.path.setAttribute("stroke", on ? flowColor() : DIM);
@@ -90,58 +120,117 @@ function setPort(p, on, ghost = false) {
   if (p.label) p.label.setAttribute("opacity", op);
 }
 
-// ---------- 그림: 월드모델(위)과 뇌(아래)를 하나의 SVG에, 사이에 게임 ----------
-// 화살표: 게임 감각 → 인코더, 게임 감각 → 감각뉴런, 하행뉴런 → 게임(행동), 하행뉴런 → 기억 h(행동),
-//         출력 → 감각뉴런(복원 감각, 상상일 때만 실제로 쓰임)
-function buildFlow() {
+// ---------- 그림: 위에서 아래로 게임 → 월드모델 → 뇌 ----------
+// 가운데 열(x 134~230)이 주된 흐름이고, 왼쪽 회색 칸은 State map · Brain map 3D다.
+// 바깥 두 줄은 게임과 오가는 값: 왼쪽(x 10) = 실제 관측 o_t → 감각뉴런, 오른쪽(x 350) = 행동 a_t → 게임 · h_{t+1}.
+// 출력 → 감각뉴런(복원 감각 ô_t)은 상상일 때만 실제로 쓰인다.
+// 세로 위치는 화면에 맞춘다(fitFlow): 월드모델 틀은 오른쪽 월드모델 칸이 끝나는 줄에서 끝나고, 뇌 틀은 뇌 칸과 같은 줄에서 시작한다.
+const NEED_WM = 290, NEED_BR = 224;   // 내용이 들어가는 최소 높이 (viewBox 단위): 맨 위~월드모델 틀 아래, 뇌 틀 위~맨 아래
+const NATURAL = { key: "natural", vb: "0 0 360 517", wmTop: 62, wmBot: 285, brTop: 297, brBot: 513 };   // 좁은 화면용 기본 배치
+
+// 남는 높이를 네 곳(위 여백, 상자 사이 두 곳, 아래 여백)에 고르게 나눈다. 상자 사이는 36까지만 늘리고 나머지는 위아래 여백으로
+function spread(extra) {
+  const e = Math.max(0, extra), gap = Math.min(e / 4, 36);
+  return { pad: (e - 2 * gap) / 2, gap };
+}
+// 그림 칸과 오른쪽 두 칸의 실제 위치를 재서 viewBox와 두 틀의 세로 위치를 정한다
+function flowGeometry() {
+  const svg = $("flow-svg"), a = document.querySelector(".explorer .half.wm"), b = document.querySelector(".explorer .half.br");
+  if (!svg || !a || !b) return null;
+  const r = svg.getBoundingClientRect(), ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+  // 좁은 화면에서는 오른쪽 칸들이 그림 아래로 내려가 맞출 대상이 없다
+  if (r.width < 100 || r.height < 200 || ra.left < r.right - 1) return null;
+  const div = (ra.bottom + rb.top) / 2 - r.top;                 // 두 칸 사이 줄 (그림 위에서부터 px)
+  const k = Math.max(360 / r.width, NEED_WM / div, NEED_BR / (r.height - div));   // px 하나당 viewBox 단위 (가로 또는 모자란 쪽 높이에 맞춤)
+  const vbw = r.width * k, vbh = r.height * k, d = div * k;
+  return { key: [r.width, r.height, div].map(Math.round).join("x"), vb: `${(360 - vbw) / 2} 0 ${vbw} ${vbh}`,
+           wmTop: 62, wmBot: d - 5, brTop: d + 5, brBot: vbh - 3 };
+}
+let flowKey = "";
+function fitFlow(force = false) {
+  if (!$("flow-svg") || !init) return;
+  const geo = flowGeometry() || NATURAL;
+  if (!force && geo.key === flowKey) return;
+  flowKey = geo.key;
+  buildFlow(geo);
+  // 다시 그린 그림에 선택 · 모드 표시를 되살림
+  for (const k of ["statemap", "z", "enc", "out", "gru"]) highlight(W[k], k === wmSel);
+  for (const k of ["brainmap", "sens", "mid", "dn"]) highlight(B[k], k === brSel);
+  applyPorts();
+  render();
+}
+
+function buildFlow(geo) {
   const svg = $("flow-svg");
   svg.innerHTML = "";
+  svg.setAttribute("viewBox", geo.vb);
   defs(svg);
   const pw = (k) => () => selectWM(k), pb = (k) => () => selectBrain(k);
-  el("rect", { x: 4, y: 4, width: 352, height: 290, rx: 12, fill: PUR.f, stroke: PUR.s, "stroke-width": 0.6 }, svg);
-  text(svg, 16, 24, "World model", { a: "start", size: 13, w: 700, fill: PUR.t });
-  el("rect", { x: 4, y: 362, width: 352, height: 228, rx: 12, fill: TEAL.f, stroke: TEAL.s, "stroke-width": 0.6 }, svg);
-  text(svg, 74, 384, "Fly brain", { a: "start", size: 13, w: 700, fill: TEAL.t });   // 화살표(x=64, 180, 262, 296)와 겹치지 않는 자리
+  const WT = geo.wmTop, WB = geo.wmBot, BT = geo.brTop, BB = geo.brBot;
+  // 가로: 가운데 열(상자) x 126~238, h_t x 266~330, 왼쪽 회색 칸 x 30~118
+  const CX = 126, CW = 112, CM = CX + CW / 2, CR = CX + CW, HX = 266, HW = 64;
+  // 세로: 남는 높이가 있으면 상자를 먼저 키우고(두 틀의 상자가 같은 크기가 되도록, 최대 +16) 나머지는 간격과 여백으로
+  const exW = WB - WT - 223, exB = BB - BT - 216;      // 223, 216 = 남는 높이가 없을 때 두 틀의 높이
+  const g = Math.max(0, Math.min(16, exW / 6, exB / 6)), bh = 44 + g, mh = 48 + g;
+  const sw = spread(exW - 3 * g), sb = spread(exB - 3 * g);
+  const encY = WT + 10 + sw.pad, zY = encY + bh + 20 + sw.gap, headY = zY + bh + 20 + sw.gap, tagY = headY + bh + 14;
+  const sensY = BT + 24 + sb.pad, midY = sensY + bh + 22 + sb.gap, dnY = midY + mh + 22 + sb.gap;
+  const mid = (a, b) => (a + b) / 2 + 4;   // 두 상자 사이 화살표 옆 글자의 높이
+  const LS = 11;                            // 화살표 옆 글자 크기
 
-  // 화살표를 먼저 그려 상자 아래에 깔리게
-  W.pGame = { path: arrow(svg, "M180 306 V254"), label: text(svg, 186, 271, "o_t", { a: "start", size: 10.5, fill: SUB }) };
-  W.pRecon = { path: arrow(svg, "M64 252 V440 H128"), label: lines(svg, 70, 270, ["reconstruction", "ô_t → brain"], "start"),
-               note: text(svg, 70, 292, "", { a: "start", size: 9.5, fill: SUB }) };
-  W.pAct = { path: arrow(svg, "M296 410 V254"), label: lines(svg, 302, 300, ["action a_t", "→ h_{t+1}"], "start") };
-  B.pActG = { path: arrow(svg, "M262 410 V326 H232"), label: text(svg, 247, 321, "a_t", { size: 10.5, fill: SUB }) };
-  B.pGame = { path: arrow(svg, "M180 346 V408"), label: text(svg, 186, 384, "o_t", { a: "start", size: 10.5, fill: SUB }) };
-  // 월드모델 안: 인코더 → 사후 z, h → 사전·사후 z, (h, z) → 출력, z와 h는 다음 스텝의 h로
-  arrow(svg, "M180 196 V150", PUR.s);
-  text(svg, 185, 177, "e_t", { a: "start", size: 10, fill: PUR.u });
-  arrow(svg, "M276 196 L232 150", PUR.s);
-  text(svg, 256, 186, "h_t", { a: "end", size: 10, fill: PUR.u });
-  arrow(svg, "M128 150 L86 194", PUR.s);
-  text(svg, 100, 166, "(h_t, z_t)", { a: "end", size: 10, fill: PUR.u });
-  arrow(svg, "M240 112 H306 V194", PUR.s);
-  text(svg, 250, 106, "z_t → h_{t+1}", { a: "start", size: 10, fill: PUR.u });
+  el("rect", { x: 22, y: WT, width: 316, height: WB - WT, rx: 12, fill: PUR.f, stroke: PUR.s, "stroke-width": 0.6 }, svg);
+  text(svg, 34, WT + 18, "World model", { a: "start", size: 13.5, w: 700, fill: PUR.t });
+  el("rect", { x: 22, y: BT, width: 316, height: BB - BT, rx: 12, fill: TEAL.f, stroke: TEAL.s, "stroke-width": 0.6 }, svg);
+  text(svg, 34, BT + 18, "Fly brain", { a: "start", size: 13.5, w: 700, fill: TEAL.t });
+
+  // 게임과 오가는 화살표 (모드에 따라 켜고 끔). 상자보다 먼저 그려 아래에 깔리게
+  const oY = sensY + bh * 0.68, aY = dnY + bh / 2;
+  W.pGame = { path: arrow(svg, `M${CM} 46 V${encY - 2}`), label: text(svg, CM + 6, 56, "o_t", { a: "start", size: LS, fill: SUB }) };
+  B.pGame = { path: arrow(svg, `M148 46 V54 H10 V${oY} H${CX - 2}`), label: text(svg, 70, oY - 6, "o_t", { size: LS, fill: SUB }) };
+  W.pRecon = { path: arrow(svg, `M${CX + 27} ${tagY + 18} V${sensY - 2}`) };   // ô_t 꼬리표 → 감각뉴런
+  // 행동: 하행뉴런 → 게임, 같은 줄에서 갈라져 → h_{t+1}. 상상 중에는 게임 쪽만 꺼지므로 h 쪽을 위에 그린다
+  B.pActG = { path: arrow(svg, `M${CR} ${aY} H350 V28 H234`), label: text(svg, 292, 23, "a_t", { size: LS, fill: SUB }) };
+  W.pAct = { path: arrow(svg, `M${CR} ${aY} H350 V${zY + bh + 28} H${HX + HW / 2} V${zY + bh + 2}`),
+             label: text(svg, HX + HW / 2 + 6, zY + bh + 19, "a_t", { a: "start", size: LS, fill: SUB }) };
+
+  // 월드모델 안: 인코더 → 사후 z, h → z, z → 다음 스텝의 h, (h, z) → 출력 머리들
+  const y1 = zY + bh * 0.32, y2 = zY + bh * 0.7, gm = (CR + HX) / 2;
+  arrow(svg, `M${CM} ${encY + bh} V${zY - 2}`, PUR.s);
+  text(svg, CM + 6, mid(encY + bh, zY), "e_t", { a: "start", size: LS, fill: PUR.u });
+  arrow(svg, `M${HX} ${y1} H${CR + 2}`, PUR.s);
+  text(svg, gm, y1 - 5, "h_t", { size: LS, fill: PUR.u });
+  arrow(svg, `M${CR} ${y2} H${HX - 2}`, PUR.s);
+  text(svg, gm, y2 + 13, "z_t", { size: LS, fill: PUR.u });
+  arrow(svg, `M${CM} ${zY + bh} V${headY - 2}`, PUR.s);
+  text(svg, CM + 6, mid(zY + bh, headY), "(h_t, z_t)", { a: "start", size: LS, fill: PUR.u });
+  braceUp(svg, headY + bh + 4, CX, CR, PUR.u);
   // 뇌 안: 발화율 ρ가 연결 W를 타고 감각 → 중간 → 하행으로
-  arrow(svg, "M180 454 V476", TEAL.s);
-  text(svg, 186, 469, "ρ_t", { a: "start", size: 10, fill: TEAL.u });
-  arrow(svg, "M296 478 V456", TEAL.s);
-  text(svg, 302, 471, "ρ_t", { a: "start", size: 10, fill: TEAL.u });
+  arrow(svg, `M${CM} ${sensY + bh} V${midY - 2}`, TEAL.s);
+  text(svg, CM + 6, mid(sensY + bh, midY), "ρ_t", { a: "start", size: LS, fill: TEAL.u });
+  arrow(svg, `M${CM} ${midY + mh} V${dnY - 2}`, TEAL.s);
+  text(svg, CM + 6, mid(midY + mh, dnY), "ρ_t", { a: "start", size: LS, fill: TEAL.u });
 
-  W.statemap = tile(svg, { x: 16, y: 34, w: 328, h: 38, title: "State map", sub: "model state (h_t, z_t) → 2-D by PCA" }, pw("statemap"));
-  W.z = box(svg, { x: 120, y: 92, w: 120, h: 56, c: PUR, title: "z_t", sub: "stochastic · 16×16" }, pw("z"));
-  W.out = box(svg, { x: 14, y: 196, w: 100, h: 56, c: PUR, title: "Outputs", sub: "ô_t · r̂_t · ĉ_t · v_t" }, pw("out"));
-  W.enc = box(svg, { x: 130, y: 196, w: 100, h: 56, c: PUR, title: "Encoder", sub: "o_t → e_t" }, pw("enc"));
-  W.gru = box(svg, { x: 246, y: 196, w: 100, h: 56, c: PUR, title: "h_t", sub: "deterministic · GRU" }, pw("gru"));
-  setText(W.gru.val, "↻ h_t → h_{t+1}");   // h는 자기 자신을 다음 스텝으로 넘긴다
-
+  // 게임: 시간에 따라 이어지는 화면이라 카드를 겹쳐 그림
   G.g = el("g", {}, svg);
-  el("rect", { x: 130, y: 306, width: 100, height: 40, rx: 7, fill: "#ffffff", stroke: "#8a919e", "stroke-width": 1 }, G.g);
-  text(G.g, 180, 322, "Game", { size: 12, w: 600 });
-  text(G.g, 180, 336, "panel on the right", { size: 9.5, fill: SUB });
+  for (const d of [8, 4]) el("rect", { x: 132 - d, y: 10 - d, width: 100, height: 36, rx: 3, fill: "#f3f4f6", stroke: "#8a919e", "stroke-width": 0.8 }, G.g);
+  el("rect", { x: 132, y: 10, width: 100, height: 36, rx: 3, fill: "#ffffff", stroke: "#8a919e", "stroke-width": 1 }, G.g);
+  text(G.g, 182, 33, "Game", { size: 14, w: 600 });
 
-  B.sens = box(svg, { x: 130, y: 410, w: 100, h: 44, c: TEAL, title: "Sensory", sub: "580 neurons" }, pb("sens"));
-  B.dn = box(svg, { x: 246, y: 410, w: 100, h: 44, c: TEAL, title: "Descending", sub: "1,276 neurons" }, pb("dn"));
-  B.mid = box(svg, { x: 130, y: 478, w: 216, h: 44, c: TEAL, title: "Middle", sub: "13,144 neurons · recurrent" }, pb("mid"));
-  // 위 State map 칸과 같은 폭·높이
-  B.brainmap = tile(svg, { x: 16, y: 540, w: 328, h: 38, title: "Brain map 3D", sub: "all 15,000 neurons at their real positions (FlyWire)" }, pb("brainmap"));
+  W.statemap = tile(svg, { x: 30, y: (encY + zY + bh) / 2 - 27, w: 88, title: "State map", sub: ["(h_t, z_t) → 2-D", "by PCA"] }, pw("statemap"));
+  W.enc = box(svg, { x: CX, y: encY, w: CW, h: bh, c: PUR, title: "Encoder", sub: "o_t → e_t", shape: "widen" }, pw("enc"));
+  W.z = box(svg, { x: CX, y: zY, w: CW, h: bh, c: PUR, title: "z_t", sub: "stochastic · 16×16" }, pw("z"));
+  W.gru = box(svg, { x: HX, y: zY, w: HW, h: bh, c: PUR, title: "h_t", sub: "GRU ↻" }, pw("gru"));
+  W.out = box(svg, { x: CX, y: headY, w: CW, h: bh, c: PUR, title: "Heads", sub: "decoder · reward", shape: "narrow" }, pw("out"));
+  // 꼬리표를 누르면 Heads의 그 값을 계산하는 단계가 바로 열린다 (Decoder 3, Reward head)
+  ["ô_t", "r̂_t"].forEach((v, i) => tag(svg, CX + 58 * i, tagY, 54, v, () => { stepSel.out = 2 + i; selectWM("out"); }));
+
+  B.sens = box(svg, { x: CX, y: sensY, w: CW, h: bh, c: TEAL, title: "Sensory", sub: "" }, pb("sens"));
+  // 부제: 감각 색 점 세 개(먹이 · CO₂ · 포식자) + 뉴런 수
+  for (const c of [PAL.food, PAL.co2, PAL.pred]) el("tspan", { fill: rgb(c) }, B.sens.sub).textContent = "●";
+  el("tspan", {}, B.sens.sub).textContent = " 580 neurons";
+  B.mid = netBox(svg, { x: CX, y: midY, w: CW, h: mh, c: TEAL, title: "Middle", sub: ["13,144 neurons", "recurrent", "3 updates / step"] }, pb("mid"));
+  B.dn = box(svg, { x: CX, y: dnY, w: CW, h: bh, c: TEAL, title: "Descending", sub: "1,276 neurons" }, pb("dn"));
+  B.brainmap = tile(svg, { x: 30, y: (midY + dnY + bh) / 2 - 33, w: 88, title: "Brain map 3D", sub: ["15,000 neurons", "at real positions", "(FlyWire)"] }, pb("brainmap"));
 }
 
 // ---------- 뉴런 묶음 ----------
@@ -207,7 +296,11 @@ function buildDisplay(sim, gr) {
   const ro = init.readout, dnName = (j) => `${init.cell_type[ro.neurons[j]] || "DN"}${sideL(ro.neurons[j])}`;
   const B = { data: ro.w, rows: 3, cols: ro.neurons.length,
     hit: (r, c) => ({ text: `B[${["forward", "turn", "jump"][r]}, ${dnName(c)}] = ${(ro.w[r * ro.neurons.length + c] < 0 ? "−" : "") + Math.abs(ro.w[r * ro.neurons.length + c]).toFixed(3)}` }) };
-  return { order, name, sensOrder, inRow, U: { data: U, rows: sensOrder.length, cols: 36 }, sensName: (k) => name(k), conn, B, dnName };
+  // 감각 입력은 감각 색으로: 열(관측 칸) = 먹이 2 · CO₂ 2 · 눈 32, 행(감각뉴런) = 자기 묶음의 색
+  const obsHue = (c) => (c < 2 ? PAL.food : c < 4 ? PAL.co2 : PAL.pred);
+  const sensHue = gr.sens.flatMap((g) => g.idx.map(() => g.color));
+  return { order, name, sensOrder, inRow, U: { data: U, rows: sensOrder.length, cols: 36, hue: (r, c) => obsHue(c) }, sensHue,
+           sensName: (k) => name(k), conn, B, dnName };
 }
 
 // ---------- 공개 함수 ----------
@@ -216,7 +309,7 @@ export function setupExplorer(msg, { onMode } = {}) {
   init = msg;
   onModeChange = onMode || (() => {});
   buildGroups();
-  buildFlow();
+  fitFlow(true);
   document.querySelectorAll("#src-mode button").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.src)));
   for (const id of ["wml-canvas", "brl-canvas"]) { $(id).addEventListener("mousemove", hover); $(id).addEventListener("mouseleave", unhover); }
   for (const [id, key] of [["wml-steps", () => wmSel], ["brl-steps", () => brSel]]) {
@@ -239,6 +332,10 @@ export function setupExplorer(msg, { onMode } = {}) {
     window.addEventListener("resize", fitGame);
     fitGame();
   }
+  // 창 · 칸 크기가 바뀌면 왼쪽 그림의 세로 배치를 다시 맞춘다
+  const left = document.querySelector(".explorer .left");
+  if (left) new ResizeObserver(() => fitFlow()).observe(left);
+  window.addEventListener("resize", () => fitFlow());
   return true;
 }
 
@@ -246,7 +343,7 @@ let frames = 0;
 export function explorerFrame(f, rates) {
   if (!init) return;
   last = { f, rates };
-  if (++frames % 20 === 0) fitGame();   // 창 크기가 바뀐 직후 놓친 경우를 대비한 확인 (1초에 한 번)
+  if (++frames % 20 === 0) { fitGame(); fitFlow(); }   // 창 크기가 바뀐 직후 놓친 경우를 대비한 확인 (1초에 한 번)
   render();
 }
 
@@ -254,17 +351,21 @@ function setMode(m) {
   detailDirty = true;
   mode = m;
   document.querySelectorAll("#src-mode button").forEach((b) => b.classList.toggle("on", b.dataset.src === m));
-  const real = m === "real";
+  applyPorts();
+  onModeChange(m);
+  render();
+}
+// 모드에 따라 게임과 오가는 화살표를 켜고 끔 (그림을 다시 그린 뒤에도 부른다)
+function applyPorts() {
+  const real = mode === "real";
   setPort(W.pGame, real);
   setPort(W.pRecon, !real, real);
   setPort(W.pAct, true);
   setPort(B.pActG, real);
   setPort(B.pGame, real);
-  W.pRecon.note.textContent = real ? "(display only)" : "";
+  setText(W.enc.sub, real ? "o_t → e_t" : "off (no o_t)");
   W.enc.g.setAttribute("opacity", real ? 1 : 0.4);
   G.g.setAttribute("opacity", real ? 1 : 0.4);
-  onModeChange(m);
-  render();
 }
 
 function selectWM(k) {
@@ -322,12 +423,6 @@ function render() {
     setHTML($("brl-head"), head("Waiting for the first imagined rollout…", ""));
     return;
   }
-  // 그림 안 값
-  if (s.wm) {
-    setText(W.z.val, mode === "real" && s.wm.kl != null ? `KL(q‖p) ${s.wm.kl.toFixed(2)}` : "from prior ẑ_t");
-    setText(W.out.val, s.wm.value != null ? `v_t ${f2(s.wm.value)}` : "");
-    W.enc.val.textContent = mode === "real" ? "" : "off";
-  }
   // 상세 칸(계산 그림)은 초당 10번까지만 다시 그린다. 칸·단계·모드를 바꾸면 바로 그린다
   const now = performance.now();
   if (detailDirty || now - lastDetail > 95) {
@@ -339,8 +434,6 @@ function render() {
 }
 
 const head = (t, sub) => `<div class="xd-head"><span class="xd-title">${t}</span><span class="muted">${sub}</span></div>`;
-const formula = (s) => `<div class="xd-formula">${s}</div>`;
-const para = (a, b = "") => `<div class="xd-text">${a}</div>${b ? `<div class="xd-note">${b}</div>` : ""}`;
 const sideOf = (v) => {
   const l = Math.max(...v.slice(4, 20)), r = Math.max(...v.slice(20, 36));
   return Math.max(l, r) < 0.05 ? "no predator signal" : l > r ? "predator signal on the left eye" : "predator signal on the right eye";
@@ -386,7 +479,7 @@ function fitGame() {
 
 // ---------- 계산 화면: 층을 누르면 단계별로 "W · x + b = y → 활성화" ----------
 // 표기는 RSSM 논문을 따른다: o_t 관측, a_t 행동, h_t 결정적 상태, z_t 확률적 상태(사후), ẑ_t 사전,
-// e_t 인코더 출력, ô_t 복원 관측, r̂_t 보상, ĉ_t 계속, v_t 가치. 뇌: ρ 발화율, v 막전위, I 감각 입력.
+// e_t 인코더 출력, ô_t 복원 관측, r̂_t 보상. 뇌: ρ 발화율, v 막전위, I 감각 입력.
 const stepSel = { enc: 0, gru: 0, z: 0, out: 0, sens: 0, mid: 0, dn: 0 };
 const V = (v, label, kind = "signed", space = null, extra = {}) => ({ t: "vec", v, label, kind, space, ...extra });
 const M = (m, label, rowSpace = "j", colSpace = "i", extra = {}) => ({ t: "mat", m, label, rowSpace, colSpace, ...extra });
@@ -395,7 +488,16 @@ const op = (s) => ({ t: "op", s });
 const fn = (s) => ({ t: "fn", s });
 const num = (text, label) => ({ t: "num", text, label });
 const add = (a, b) => Float32Array.from(a, (v, i) => v + b[i]);
+// 관측 36칸의 구간 이름 (계산 그림에서 첫 관측 벡터 왼쪽에 붙임)
+const OBS_SEGS = [
+  { from: 0, to: 0, label: "food odor L", c: PAL.food }, { from: 1, to: 1, label: "food odor R", c: PAL.food },
+  { from: 2, to: 2, label: "CO₂ L", c: PAL.co2 }, { from: 3, to: 3, label: "CO₂ R", c: PAL.co2 },
+  { from: 4, to: 19, label: "left eye ×16", c: PAL.pred }, { from: 20, to: 35, label: "right eye ×16", c: PAL.pred },
+];
+// 관측 36칸 그리기: 냄새 4칸을 크게, 먹이 / CO₂ / 왼눈 / 오른눈 사이를 띄움 (같은 화면의 관측 벡터 모두에 줘서 줄을 맞춤)
+const OBS_CELLS = { big: [0, 1, 2, 3], gapsBefore: [2, 4, 20] };
 const OBS_NAME = (i) => (i < 2 ? `food odor ${i ? "right" : "left"}` : i < 4 ? `CO₂ ${i === 3 ? "right" : "left"}` : i < 20 ? `left eye cell ${i - 3}` : `right eye cell ${i - 19}`);
+const OBS = { names: OBS_NAME, cells: OBS_CELLS }, OBS_L = { ...OBS, segs: OBS_SEGS };   // 관측 벡터 옵션. OBS_L은 구간 이름도 붙임
 const ACT_NAME = (i) => ["forward", "turn (+ = left)", "jump"][i];
 const ZNAME = (i) => `group ${Math.floor(i / 16) + 1}, class ${(i % 16) + 1}`;
 const maxDiff = (a, b) => { let m = 0; for (let i = 0; i < a.length; i++) m = Math.max(m, Math.abs(a[i] - b[i])); return m; };
@@ -415,7 +517,7 @@ function wmLayer(s) {
     const L = x.encoder(s.obs), body = `o<sub>t</sub>: ${obsText(s.obs)}.`;
     return { title: "Encoder", sub: `${s.label} · 142,080 parameters`, steps: [
       { chip: "Linear 1", tex: "y^{(1)}_j=\\sum_{i=1}^{36}W^{(1)}_{ji}\\,o_{t,i}+b^{(1)}_j,\\qquad x^{(1)}=\\mathrm{SiLU}\\big(\\mathrm{LN}(y^{(1)})\\big)",
-        items: linearItems(L[0], "W^{(1)}", V(s.obs, "o_t", "obs", "i", { names: OBS_NAME }), "b^{(1)}", "y^{(1)}", "x^{(1)}"), body },
+        items: linearItems(L[0], "W^{(1)}", V(s.obs, "o_t", "obs", "i", OBS_L), "b^{(1)}", "y^{(1)}", "x^{(1)}"), body },
       { chip: "Linear 2", tex: "y^{(2)}_j=\\sum_{i=1}^{256}W^{(2)}_{ji}\\,x^{(1)}_i+b^{(2)}_j,\\qquad x^{(2)}=\\mathrm{SiLU}\\big(\\mathrm{LN}(y^{(2)})\\big)",
         items: linearItems(L[1], "W^{(2)}", V(L[1].input, "x^{(1)}", "signed", "i"), "b^{(2)}", "y^{(2)}", "x^{(2)}"),
         body: "LN normalizes the 256 values (LayerNorm), then SiLU(y) = y·σ(y)." },
@@ -474,23 +576,23 @@ function wmLayer(s) {
     }
     return { title: "Stochastic state z_t", sub: `${s.label} · prior 132,096${real ? " + posterior 197,632" : ""} parameters`, steps };
   }
-  // 출력: 복원 관측 ô_t, 보상 r̂_t (ĉ_t, v_t는 값만)
+  // 출력 머리: 복원 관측 ô_t, 보상 r̂_t
   const dec = x.decoder(h, z), rw = x.reward(h, z), d0 = dec.steps[0], d1 = dec.steps[1], d2 = dec.steps[2], r2 = rw.steps[2];
   const hz = V(d0.input, "[h_t; z_t]", "signed", "i", { names: (i) => (i < 256 ? `h_t #${i + 1}` : `z_t ${ZNAME(i - 256)}`) });
-  return { title: "Outputs", sub: `${s.label} · 471,075 parameters`, steps: [
+  return { title: "Heads", sub: `${s.label} · 471,075 parameters`, steps: [
     { chip: "Decoder 1", tex: "x^{(1)}=\\mathrm{SiLU}\\big(\\mathrm{LN}(W^{(1)}[h_t;\\,z_t]+b^{(1)})\\big)",
       items: linearItems(d0, "W^{(1)}", hz, "b^{(1)}", "y^{(1)}", "x^{(1)}"), body: "The decoder turns the model state (h<sub>t</sub>, z<sub>t</sub>) back into an observation." },
     { chip: "Decoder 2", tex: "x^{(2)}=\\mathrm{SiLU}\\big(\\mathrm{LN}(W^{(2)}x^{(1)}+b^{(2)})\\big)",
       items: linearItems(d1, "W^{(2)}", V(d1.input, "x^{(1)}", "signed", "i"), "b^{(2)}", "y^{(2)}", "x^{(2)}"), body: "Second hidden layer." },
     { chip: "Decoder 3", tex: "\\hat o_{t,j}=\\mathrm{clip}_{[0,1]}\\Big(\\sum_{i=1}^{256}W^{(3)}_{ji}\\,x^{(2)}_i+b^{(3)}_j\\Big)",
       items: [M(d2.W, "W^{(3)}"), op("·"), V(d2.input, "x^{(2)}", "signed", "i"), op("+"), V(d2.b.data, "b^{(3)}", "signed", "j"), op("="),
-        V(dec.recon, "ô_t", "obs", "j", { names: OBS_NAME }), ...(real ? [op("vs"), V(s.obs, "o_t", "obs", "j", { names: OBS_NAME })] : [])],
+        V(dec.recon, "ô_t", "obs", "j", OBS_L), ...(real ? [op("vs"), V(s.obs, "o_t", "obs", "j", OBS)] : [])],
       body: real ? `In real play ô<sub>t</sub> is only displayed; compare it with the real o<sub>t</sub>.` : "ô<sub>t</sub> stands in for o<sub>t</sub>: the brain's sensory neurons get it at the next imagined step.",
       note: real ? check(maxDiff(dec.recon, w.recon)) : "" },
     { chip: "Reward head", tex: "\\hat r_t=\\mathrm{symexp}\\Big(\\sum_{k=1}^{255}\\mathrm{softmax}(\\ell)_k\\,b_k\\Big),\\quad \\ell=W^{r}_3x^{r}+b^{r}_3",
       items: [M(r2.W, "W^r_3"), op("·"), V(r2.input, "x^r", "signed", "i"), fn("+ b, softmax"),
-        V(rw.probs, "p", "unit", "j", { names: (k) => `bin ${k + 1} (symlog reward ${x.bins[k].toFixed(2)})` }), fn("symexp(Σ p_k b_k)"), num(f2(rw.value), "r̂_t")],
-      body: `x<sup>r</sup> comes from two hidden layers shaped like the decoder's. Continue ĉ<sub>t</sub> = ${Math.round((w.cont ?? 1) * 100)}%, value v<sub>t</sub> = ${f2(w.value ?? 0)} (critic).`,
+        V(rw.probs, "p", "unit", "j", { names: (k) => `bin ${k + 1} (symlog reward ${x.bins[k].toFixed(2)})`, values: true }), fn("symexp(Σ p_k b_k)"), num(f2(rw.value), "r̂_t")],
+      body: "Reward predicted for this step. x<sup>r</sup> comes from two hidden layers shaped like the decoder's; the output is 255 bin probabilities, and their average is turned back to reward size by symexp.",
       note: w.reward != null ? check(Math.abs(rw.value - w.reward)) : "" },
   ] };
 }
@@ -500,14 +602,14 @@ function brainLayer(s) {
   if (!io || !sim) return { title: "Fly brain", sub: s.label, steps: [{ chip: "", tex: "", body: "Waiting for the brain's first step…" }] };
   if (brSel === "sens") {
     const D = groups.disp, n = D.sensOrder.length;
-    const I = Float32Array.from(D.sensOrder, (id) => io.I[D.inRow.get(id)]), rho = Float32Array.from(D.sensOrder, (id) => r[id] / 255);
+    const I = Float32Array.from(D.sensOrder, (id) => io.I[D.inRow.get(id)]);
     return { title: "Sensory neurons · 580", sub: `${s.label} · input: ${real ? "real observation o<sub>t</sub>" : "reconstruction ô<sub>t</sub>"}`, steps: [
       { chip: "Adaptation", tex: "s_t=\\max\\big(0,\\;o_t+8\\,m\\odot(o_t-c_{t-1})\\big),\\qquad c_t=c_{t-1}+0.3\\,(o_t-c_{t-1})",
-        items: [V(s.obs, oLab, "obs", "i", { names: OBS_NAME }), op("−"), V(io.c, "c_{t-1}", "obs", "i", { names: OBS_NAME }), fn("×8m, +" + oLab + ", max(0, ·)"), V(io.s, "s_t", "obs", "i", { names: OBS_NAME })],
+        items: [V(s.obs, oLab, "obs", "i", OBS_L), op("−"), V(io.c, "c_{t-1}", "obs", "i", OBS), fn("×8m, +" + oLab + ", max(0, ·)"), V(io.s, "s_t", "obs", "i", OBS)],
         body: "m = 1 only on the 4 odor channels, so smell responds to change like real olfactory receptor neurons; c is the recent average." },
       { chip: "Input weights", tex: "I_{t,k}=\\sum_{j=1}^{36}\\mathrm{softplus}(U_{kj})\\,M_{kj}\\,s_{t,j}",
-        items: [M(D.U, "softplus(U)⊙M", "k", "i"), op("·"), V(io.s, "s_t", "obs", "i", { names: OBS_NAME }), op("="),
-          V(I, "I_t", "signed", "k", { names: D.sensName }), fn("dynamics"), V(rho, "ρ_t", "unit", "k", { names: D.sensName })],
+        items: [M(D.U, "softplus(U)⊙M", "k", "i"), op("·"), V(io.s, "s_t", "obs", "i", OBS_L), op("="),
+          V(I, "I_t", "signed", "k", { names: D.sensName, hue: (k) => D.sensHue[k] })],
         body: "M lets each sense reach only neurons of its own type and side (5,290 learned weights). I<sub>t</sub> then drives v (see Middle)." },
     ] };
   }
@@ -518,10 +620,13 @@ function brainLayer(s) {
     sim.in_neurons.forEach((id, k) => (Iall[id] = io.I[k]));
     D.order.forEach((id, k) => { let a = 0; for (let e = sim.ptr[id]; e < sim.ptr[id + 1]; e++) a += sim.val[e] * prev[sim.col[e]]; wr[k] = a; });
     const dv = (arr, sc = 1) => Float32Array.from(D.order, (id) => arr[id] * sc);
+    // u_t: 뉴런마다 들어오는 입력의 합 = 연결 입력 Wρ + 감각 입력 I + 기저값 b (그림은 W·ρ + I + b = u → 막전위 갱신 → ρ_t)
+    const Io = dv(Iall), bo = dv(sim.bias), u = Float32Array.from(wr, (v, k) => v + Io[k] + bo[k]);
     return { title: "Middle neurons · 13,144", sub: `${s.label} · all 15,000 neurons, recurrent`, steps: [
-      { chip: "Recurrent step", tex: "v_i\\leftarrow v_i+\\alpha_i\\Big(-v_i+\\sum_jW_{ij}\\,\\rho_j+I_i+b_i\\Big),\\qquad\\rho_i=\\tanh(\\max(v_i,0))\\quad(\\times3)",
-        items: [M(D.conn, "W", "i", "j"), op("·"), V(dv(prev), "ρ_{t-1}", "unit", "j", { names: D.name }), op("="), V(wr, "Wρ_{t-1}", "signed", "i", { names: D.name }),
-          op("+"), V(dv(Iall), "I_t", "signed", "i", { names: D.name }), op("+"), V(dv(sim.bias), "b", "signed", "i", { names: D.name }),
+      { chip: "Recurrent step", tex: "u_i=\\sum_jW_{ij}\\,\\rho_j+I_i+b_i,\\qquad v_i\\leftarrow v_i+\\alpha_i(-v_i+u_i),\\qquad\\rho_i=\\tanh(\\max(v_i,0))\\quad(\\times3)",
+        items: [M(D.conn, "W", "i", "j"), op("·"), V(dv(prev), "ρ_{t-1}", "unit", "j", { names: D.name }),
+          op("+"), V(Io, "I_t", "signed", "i", { names: D.name }), op("+"), V(bo, "b", "signed", "i", { names: D.name }),
+          op("="), V(u, "u_t", "signed", "i", { names: D.name }),
           fn("leak α, ×3"), V(dv(r, 1 / 255), "ρ_t", "unit", "i", { names: D.name })],
         body: "W is the FlyWire wiring: 382,539 connections, rows = receiving neuron, columns = sending neuron, ordered sensory → middle → descending. Darker = stronger total connection.",
         note: "Fixed: which connections exist and their sign. Learned: a scale per cell-type pair (164,355), and α and b per cell type (4,198)." },
@@ -725,12 +830,13 @@ function renderStepGraph(host, steps, g, sel) {
 }
 
 const PANELS = {
-  wm: { head: "wml-head", steps: "wml-steps", tex: "wml-tex", cv: "wml-canvas", hov: "wml-hov", body: "wml-body", detail: "wm-detail" },
-  br: { head: "brl-head", steps: "brl-steps", tex: "brl-tex", cv: "brl-canvas", hov: "brl-hov", body: "brl-body", detail: "brain-detail" },
+  wm: { head: "wml-head", steps: "wml-steps", tex: "wml-tex", cv: "wml-canvas", detail: "wm-detail" },
+  br: { head: "brl-head", steps: "brl-steps", tex: "brl-tex", cv: "brl-canvas", detail: "brain-detail" },
 };
+// 층 제목 · 단계 구조도 · 수식 · 계산 그림만 그린다 (설명 글과 마우스 위치 설명 줄은 두지 않음)
 function renderSteps(which, key, layer) {
   const P = PANELS[which], k = Math.min(stepSel[key], layer.steps.length - 1), st = layer.steps[k];
-  setHTML($(P.head), head(plain(layer.title), layer.sub));
+  setHTML($(P.head), head(plain(layer.title), ""));
   // 단계 구조도: 칸·단계·모드·폭이 바뀔 때만 다시 그린다
   const graph = GRAPHS[key]?.(mode), host = $(P.steps);
   const gkey = graph ? `${key}|${mode}|${k}|${host.clientWidth}|${layer.steps.map((x) => x.chip).join(",")}` : "";
@@ -740,8 +846,7 @@ function renderSteps(which, key, layer) {
     else host.innerHTML = layer.steps.length > 1 ? layer.steps.map((x, i) => `<button data-k="${i}"${i === k ? ' class="on"' : ""}>${i + 1} · ${plain(x.chip)}</button>`).join("") : "";
   }
   setTex($(P.tex), st.tex);
-  setHTML($(P.body), para(st.body || "", st.note || ""));
-  const cv = $(P.cv), ids = [P.head, P.steps, P.tex, P.hov, P.body];
+  const cv = $(P.cv), ids = [P.head, P.steps, P.tex];
   cv.hidden = !st.items;
   if (st.items) {
     tighten(P.detail, ids, 130);
@@ -754,28 +859,74 @@ function renderSteps(which, key, layer) {
 
 function renderWMDetail(s) {
   if (wmSel === "statemap") return;
-  $("wml-sense").hidden = true;
   if (!s.wm || !init.explain) {
     setHTML($("wml-head"), head(s.wm ? "Computation view needs web/data/wm_weights.json" : "World model not loaded", s.wm ? "run: python -m worldmodel.export_weights" : ""));
     $("wml-canvas").hidden = true;
     return;
   }
-  renderSteps("wm", wmSel, wmLayer(s));
+  renderSteps("wm", wmSel, symbolic(wmLayer(s)));
+}
+// 월드모델 층의 학습된 가중치 행렬과 은닉 값 벡터는 숫자 무늬에 뜻이 없어서 이름만 쓴 상자로 그린다.
+// 관측(o_t, ô_t), 확률·범주(z 격자, 보상 구간 p), 몇 개짜리 값(행동)은 실제 값을 그대로 칠한다
+function symbolic(layer) {
+  for (const st of layer.steps) for (const it of st.items || []) {
+    if (it.values) continue;
+    if ((it.t === "mat" && it.m.data) || (it.t === "vec" && (it.kind === "signed" || it.kind === "unit") && it.v.length > 8)) it.sym = true;
+  }
+  return layer;
 }
 
 function renderBrainDetail(s) {
   if (brSel === "brainmap") return;
+  // Sensory → Adaptation: 계산 그림 옆에 감각 막대. 그림 폭이 달라지므로 계산 그림보다 먼저 정한다.
+  // 칸이 좁으면(520px 미만, 그림 자리가 320px 아래로 줄어듦) 그림이 너무 작아지므로 막대를 두지 않는다
+  const side = $("brl-sense"), show = !!side && brSel === "sens" && stepSel.sens === 0 && !!s.obs && $("brain-detail").clientWidth >= 520;
+  if (side) side.hidden = !show;
+  if (show) renderSenseSide(s.obs, mode === "real");
   renderSteps("br", brSel, brainLayer(s));
 }
 
-// 마우스: 계산 그림이면 같은 첨자의 행·열·칸을 함께 강조하고 값을 보여 준다
+// 감각 막대: 지금 뇌가 받는 관측 (실제 플레이 o_t, 상상 중 ô_t = 계산 그림 첫 벡터와 같은 값).
+// 냄새는 막대 하나에 왼쪽(가운데 → 왼쪽) · 오른쪽(가운데 → 오른쪽), 눈은 왼눈 16칸 · 오른눈 16칸
+let senseBars = null;
+function renderSenseSide(obs, real) {
+  if (!senseBars) {
+    const lr = (id, color) => [0, 1].map((side) => {
+      const track = document.createElement("div"), fill = document.createElement("div");
+      track.className = "track"; fill.className = "fill";
+      fill.style.background = rgb(color);
+      fill.style[side === 0 ? "right" : "left"] = "0";
+      track.appendChild(fill);
+      $(id).appendChild(track);
+      return fill;
+    });
+    senseBars = { food: lr("bs-food", PAL.food), co2: lr("bs-co2", PAL.co2) };
+  }
+  setHTML($("brl-sense-title"), real ? "Sensory input o<sub>t</sub>" : "Imagined input ô<sub>t</sub>");
+  senseBars.food.forEach((f, i) => (f.style.width = `${Math.min(1, obs[i]) * 100}%`));
+  senseBars.co2.forEach((f, i) => (f.style.width = `${Math.min(1, obs[2 + i]) * 100}%`));
+  // 눈: 왼눈은 바깥 → 앞 순서로 보이게 뒤집어 그린다 (main.js drawEyes와 같은 배치)
+  const c = $("bs-eyes"), dpr = window.devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return;
+  if (c.width !== Math.round(w * dpr)) c.width = Math.round(w * dpr);
+  if (c.height !== Math.round(h * dpr)) c.height = Math.round(h * dpr);
+  const ctx = c.getContext("2d"), n = init.n_eye || 16, gap = 6, cw = (w - gap) / (2 * n);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  for (let i = 0; i < 2 * n; i++) {
+    const col = i < n ? n - 1 - i : i;
+    ctx.fillStyle = shade(PAL.pred, obs[4 + i]);
+    ctx.fillRect(col * cw + (i >= n ? gap : 0), 0, cw - 0.8, h);
+  }
+}
+
+// 마우스: 계산 그림이면 같은 첨자의 행·열·칸을 함께 강조한다
 function hover(e) {
-  const cv = e.currentTarget, out = $(cv.id === "wml-canvas" ? "wml-hov" : "brl-hov");
+  const cv = e.currentTarget;
   const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
   if (cv._placed) {
     const h = hitCompute(cv, px, py);
     cv._hover = h && h.space ? { space: h.space, idx: h.idx } : null;
-    out.innerHTML = h ? h.text : "";
     drawCompute(cv, cv._spec, cv._maxH);
   }
 }

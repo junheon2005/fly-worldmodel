@@ -45,8 +45,15 @@ export class LocalSession {
     }
     // 계산 화면용 가중치 (없으면 계산 화면 대신 값만 보여 줌)
     const explain = wm ? await WMExplain.load(base) : null;
+    // 3D 뇌 그림용: 뉴런별로 입력이 어느 감각에서 오는지 (flybrain/export_sense_map.py, 없으면 회색으로만 그림)
+    let sense = null;
+    try {
+      const r = await fetch(base + "brain_sense.json");
+      if (r.ok) sense = Float32Array.from((await r.json()).share, (v) => v / 1000);
+    } catch { /* 파일이 없으면 생략 */ }
     const s = new LocalSession(brain, wm, gameCanvas);
     s.explain = explain;
+    s.sense = sense;
     return s;
   }
 
@@ -82,7 +89,7 @@ export class LocalSession {
       // 하행뉴런 → 행동 읽기 가중치 (층 화면에서 뉴런별 기여도 계산용)
       readout: { neurons: Array.from(this.brain.readout_neurons), w: this.brain.readout_w, b: Array.from(this.brain.readout_b) },
       // 계산 화면용 (브라우저 실행에서만): 뇌 시뮬레이션 배열과 월드모델 가중치
-      sim: this.brain, explain: this.explain || null,
+      sim: this.brain, explain: this.explain || null, sense_share: this.sense || null,
     };
   }
 

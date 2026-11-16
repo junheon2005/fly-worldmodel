@@ -38,7 +38,7 @@ export const rgb = (c, a) => (a == null ? `rgb(${c.join(",")})` : `rgba(${c.join
 export const unit = (c) => c.map((v) => v / 255);
 
 // 값 0~1을 옅은 회색 → 색 c로 (칸 채우기용)
-const PALE = [232, 234, 238];
+export const PALE = [232, 234, 238];
 export const shade = (c, t, from = PALE) => {
   const u = Math.min(1, Math.max(0, t || 0));
   return `rgb(${from.map((v, i) => Math.round(v + (c[i] - v) * u)).join(",")})`;

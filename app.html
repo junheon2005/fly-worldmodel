@@ -45,7 +45,7 @@
   <main class="explorer">
     <div class="left">
       <!-- 왼쪽 세로 한 칸: 월드모델과 뇌의 층 구조를 하나의 그림으로 (둘 사이 화살표가 끊기지 않게) -->
-      <div class="flow"><svg id="flow-svg" viewBox="0 0 360 594" role="img" aria-label="World model and fly brain layers with the senses and actions they exchange"></svg></div>
+      <div class="flow"><svg id="flow-svg" viewBox="0 0 360 517" role="img" aria-label="World model and fly brain layers with the senses and actions they exchange"></svg></div>
 
       <!-- 오른쪽 위: 월드모델 상세 화면 -->
       <section class="panel half wm">
@@ -66,20 +66,7 @@
               <div id="wml-head"></div>
               <div id="wml-steps" class="xd-steps"></div>
               <div id="wml-tex" class="xd-tex"></div>
-              <div id="wml-sense" class="xd-sense" hidden>
-                <div class="sense">
-                  <div class="sense-row"><span>Food odor</span><div class="lr" id="o-food"></div></div>
-                  <div class="sense-row"><span>CO₂</span><div class="lr" id="o-co2"></div></div>
-                  <div class="sense-row"><span>Left / right eye</span><canvas id="eyes" height="26"></canvas></div>
-                </div>
-                <div class="legend">
-                  <span>bar · upper eye strip = real</span>
-                  <span><i style="background:var(--dream)"></i>world model's reconstruction (tick · lower eye strip)</span>
-                </div>
-              </div>
               <canvas id="wml-canvas"></canvas>
-              <div id="wml-hov" class="xd-hov"></div>
-              <div id="wml-body"></div>
             </div>
           </div>
       </section>
@@ -88,7 +75,6 @@
       <section class="panel half br">
         <div class="panel-head">
           <h2>Fly brain</h2>
-          <span class="muted" id="brain-info"></span>
         </div>
           <div class="detail" id="brain-detail">
             <div class="view fill" id="brv-map">
@@ -97,9 +83,7 @@
                 <div class="seg small" id="brain-mode">
                   <button data-v="live" class="on">Real</button>
                   <button data-v="dream">Imagined</button>
-                  <button data-v="diff">Imagined − Real</button>
                 </div>
-                <span class="muted" id="dream-info"></span>
               </div>
               <div class="legend" id="legend"></div>
             </div>
@@ -107,9 +91,19 @@
               <div id="brl-head"></div>
               <div id="brl-steps" class="xd-steps"></div>
               <div id="brl-tex" class="xd-tex"></div>
-              <canvas id="brl-canvas"></canvas>
-              <div id="brl-hov" class="xd-hov"></div>
-              <div id="brl-body"></div>
+              <div class="xd-row">
+                <!-- Sensory → Adaptation 왼쪽: 지금 뇌가 받는 관측을 막대로 (explorer.js) -->
+                <div id="brl-sense" class="xd-side" hidden>
+                  <div class="xd-side-title" id="brl-sense-title"></div>
+                  <div class="sense">
+                    <div class="sense-row lr-head"><span></span><div class="lr"><span>L</span><span>R</span></div></div>
+                    <div class="sense-row"><span>Food odor</span><div class="lr" id="bs-food"></div></div>
+                    <div class="sense-row"><span>CO₂</span><div class="lr" id="bs-co2"></div></div>
+                    <div class="sense-row"><span>Eyes</span><canvas id="bs-eyes"></canvas></div>
+                  </div>
+                </div>
+                <canvas id="brl-canvas"></canvas>
+              </div>
             </div>
           </div>
       </section>

@@ -88,7 +88,8 @@ main {
   position: relative;
   width: 100%;
   aspect-ratio: 4 / 3;
-  background: #0b0d11;
+  background: #fafbfc;   /* State map과 같은 밝은 바탕 */
+  border: 1px solid var(--line);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -188,6 +189,15 @@ main.explorer { grid-template-columns: 2fr 1fr; }
 .xd-hov { font-size: 12px; color: var(--muted); min-height: 18px; }
 .xd-sense { margin: 6px 0 4px; }
 #wml-canvas, #brl-canvas { margin-top: 6px; }
+/* 계산 그림 + 옆 패널(Sensory의 감각 막대): 그림이 남는 폭을 쓰고 패널은 고정 폭 */
+.xd-row { display: flex; align-items: center; gap: 14px; }
+.xd-row > canvas { flex: 1 1 0; min-width: 0; width: auto; }
+.xd-side { flex: 0 0 180px; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fafbfc; }
+.xd-side[hidden] { display: none !important; }
+.xd-side-title { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.xd-side .sense-row { grid-template-columns: 62px 1fr; font-size: 11.5px; }
+.xd-side #bs-eyes { height: 18px; }
+.xd-side .lr-head .lr span { text-align: center; font-size: 11px; font-weight: 600; color: var(--muted); line-height: 1; }   /* 막대 위 L · R */
 /* 계산 화면: 단계 버튼, 수식 */
 .xd-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 2px; }
 .xd-steps:empty { display: none; }

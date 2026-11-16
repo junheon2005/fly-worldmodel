@@ -12,7 +12,7 @@ let brain = null;
 let ws = null;
 let local = null;     // 브라우저 안에서 돌 때의 LocalSession
 const history = { reward: [], total: [], h: [], pred: [], real: [], value: [], surprise: [] };
-let viewMode = "live";          // 뇌 보기: live(실제) / dream(꿈) / diff(꿈 − 실제)
+let viewMode = "live";          // 뇌 보기: live(실제) / dream(상상 중 뇌 활동)
 let pins = new Map();           // 월드모델 믿음 고정: z 범주 → 칸
 let zLayout = null;             // z 격자 칸 크기 (클릭 위치 계산용)
 let lastRates = null;           // 마지막 실제 뇌 발화율 (일시정지 중 비교용)
@@ -23,12 +23,12 @@ let lastStep = null;            // 지금 보여 주는 상태 t의 스텝 번�
 let recentEye = [];             // 최근 10프레임의 눈 접근 신호 최대값 (저장 시 상황 설명용)         // 저장한 믿음: [[범주, 칸], ...] + 저장 당시 상황
 const HISTORY = 300;
 let wmMap = null;               // 상태 지도 (PCA): web/data/wm_map.json
-const mapTrail = [];            // 최근 상태 지도 위치 (꼬리)
 // 색은 palette.js의 규칙을 따른다. 상태 지도 구역(평온 · 먹이 근처 · CO2 · 포식자)은 감각 색,
 // 지금 위치와 지나온 경로는 실제(검정), 상상한 앞날은 파랑
 const MAP_RGB = [PAL.calm, PAL.food, PAL.co2, PAL.pred];
 const MAP_SOLID = MAP_RGB.map((c) => rgb(c));
 const TRAIL_RGB = PAL.real.join(",");
+const mapTrail = [];            // 최근 상태 지도 위치 (꼬리, 범례에는 넣지 않음)
 const DREAM = (a) => rgb(PAL.dream, a);
 
 // ---------- 막대 그래프 ----------
@@ -355,7 +355,7 @@ function drawStateMap(cur, imagined) {
   }
   ctx.clearRect(0, 0, w, h);
   ctx.drawImage(mapBg, 0, 0, w, h);
-  // 최근 궤적: 보라색 선 (오래될수록 흐리게)
+  // 최근 궤적: 검정 선 (오래될수록 흐리게)
   ctx.lineWidth = 2;
   for (let i = 1; i < mapTrail.length; i++) {
     ctx.strokeStyle = `rgba(${TRAIL_RGB},${0.1 + 0.6 * (i / mapTrail.length)})`;
@@ -392,7 +392,7 @@ function mapLegend() {
   if (!$("map-legend") || !wmMap) return;
   $("map-legend").innerHTML =
     wmMap.labels.map((l, i) => `<span><i style="background:${MAP_SOLID[i]}"></i>${l.replace("CO2", "CO₂")}</span>`).join("") +
-    `<span><i style="background:${rgb(PAL.real)}"></i>now</span><span><i style="background:rgba(${TRAIL_RGB},0.45)"></i>recent path</span>` +
+    `<span><i style="background:${rgb(PAL.real)}"></i>now</span>` +
     `<span><i style="background:${DREAM()}"></i>imagined 15 steps (○ = where the imagination started)</span>` +
     `<span class="muted">axes explain ${(100 * (wmMap.explained[0] + wmMap.explained[1])).toFixed(0)}% of state variance</span>`;
 }
@@ -404,12 +404,8 @@ function drawPreview(p) {
   if (rawOpen()) drawZ(p.z_probs, p.z_shape);
   drawPred(p.imagined);
   if (wmMap) drawStateMap(project(p.h, p.z), p.imagined);
-  $("wm-num").innerHTML = `r̂<sub>t</sub> ${p.reward_pred.toFixed(2)} · v<sub>t</sub> ${p.value.toFixed(1)} · ĉ<sub>t</sub> ${(p.cont * 100).toFixed(0)}% (preview)`;
-  if (viewMode !== "live" && lastRates) {
-    brain.update(p.dream.rates, viewMode === "diff" ? { diffFrom: lastRates } : {});
-    const a = p.dream.action;
-    $("dream-info").textContent = `imagined from now (step ${p.dream.originStep}) · end of rollout · forward ${a[0].toFixed(2)} turn ${a[1].toFixed(2)} jump ${a[2].toFixed(2)}`;
-  }
+  $("wm-num").innerHTML = `r̂<sub>t</sub> ${p.reward_pred.toFixed(2)} (preview)`;
+  if (viewMode !== "live" && lastRates) brain.update(p.dream.rates);
   updatePinInfo();
 }
 
@@ -420,13 +416,13 @@ function updatePinInfo() {
 // 원래 h·z 그림은 'Raw state'를 펼쳤을 때만 그림 (legacy.html에는 접기가 없으니 항상)
 const rawOpen = () => !$("raw") || $("raw").open;
 
-// 월드모델 복원 감각: app.html은 실제 막대 위에 흰 눈금으로, legacy.html은 별도 막대로
+// 월드모델 복원 감각: legacy.html은 별도 막대로 (app.html에는 감각 막대가 없음)
 function showRecon(recon) {
   if (setFoodR) {
     setFoodR[0](recon[0]); setFoodR[1](recon[1]);
     setCO2R[0](recon[2]); setCO2R[1](recon[3]);
     drawEyes(recon, "eyes-r");
-  } else {
+  } else if (setFood) {
     setFood[0](lastObs[0], recon[0]); setFood[1](lastObs[1], recon[1]);
     setCO2[0](lastObs[2], recon[2]); setCO2[1](lastObs[3], recon[3]);
     drawEyes(lastObs, "eyes", recon);
@@ -454,7 +450,7 @@ function drawWM(wm) {
     if (mapTrail.length > 60) mapTrail.shift();
     drawStateMap(cur, wm.imagined);
   }
-  $("wm-num").innerHTML = `predicted r̂<sub>t</sub> ${wm.reward_pred.toFixed(2)} · actual r<sub>t</sub> ${wm.reward_real.toFixed(2)} · v<sub>t</sub> ${wm.value.toFixed(1)} · ĉ<sub>t</sub> ${(wm.cont * 100).toFixed(0)}%`;
+  $("wm-num").innerHTML = `predicted r̂<sub>t</sub> ${wm.reward_pred.toFixed(2)} · actual r<sub>t</sub> ${wm.reward_real.toFixed(2)}`;
 }
 
 function drawSurprise() {
@@ -494,12 +490,12 @@ let setDN, setIn, setAct, setFood, setCO2, setFoodR, setCO2R;
 
 function onInit(msg) {
   init = msg;
-  $("brain-info").textContent = `${msg.n.toLocaleString()} neurons · ${msg.trained ? "trained" : "untrained"}`;
+  if ($("brain-info")) $("brain-info").textContent = `${msg.n.toLocaleString()} neurons · ${msg.trained ? "trained" : "untrained"}`;   // legacy.html에만 있음
   $("brain-view").querySelector("canvas")?.remove();
   brain = createBrainView($("brain-view"), $("tooltip"), msg);
   setupControls();
 
-  $("legend").innerHTML = LEGEND.map(([label, color]) => `<span><i style="background:${color}"></i>${label}</span>`).join("");
+  $("legend").innerHTML = LEGEND.map(([label, color]) => (color ? `<span><i style="background:${color}"></i>${label}</span>` : `<span class="muted">${label}</span>`)).join("");
 
   // 하행뉴런·감각뉴런 막대는 legacy.html(서버)에만 있음
   const dnGroup = (i) => msg.group[msg.out_neurons[i]];
@@ -509,9 +505,10 @@ function onInit(msg) {
   setIn = $("in-bars") ? makeBars($("in-bars"), inLabels, inKeys.flatMap((k) => [GROUP_SWATCH[k], GROUP_SWATCH[k]])) : null;
   // 행동 막대는 legacy.html(서버)에만 있고, app.html은 행동 지도로 그림
   setAct = $("act-bars") ? makeBars($("act-bars"), ["Forward", "Turn (+left)", "Jump"], [rgb(PAL.action), rgb(PAL.action), rgb(PAL.jump)], true) : null;
-  setFood = makeLR($("o-food"), css("--food"));
-  setCO2 = makeLR($("o-co2"), css("--co2"));
-  // legacy.html(서버)에는 복원 감각용 막대가 따로 있고, app.html은 실제 막대에 눈금으로 겹쳐 그림
+  // 감각 막대는 legacy.html(서버)에만 있음. app.html은 Sensory 계산 화면 옆에 explorer.js가 그림
+  setFood = $("o-food") ? makeLR($("o-food"), css("--food")) : null;
+  setCO2 = $("o-co2") ? makeLR($("o-co2"), css("--co2")) : null;
+  // legacy.html(서버)에는 복원 감각용 막대가 따로 있음
   setFoodR = $("r-food") ? makeLR($("r-food"), css("--food")) : null;
   setCO2R = $("r-co2") ? makeLR($("r-co2"), css("--co2")) : null;
   drawWMPlaceholder();
@@ -585,17 +582,8 @@ function onFrame(f) {
   lastObs = f.obs;
   lastStep = f.step;
   recentEye = [...recentEye, Math.max(...f.obs.slice(4))].slice(-10);
-  // 뇌 보기: 실제 / 꿈(상상 중 뇌 활동) / 꿈 − 실제
-  if (viewMode !== "live" && f.dream) {
-    brain.update(f.dream.rates, viewMode === "diff" ? { diffFrom: rates } : {});
-    const a = f.dream.action;
-    $("dream-info").textContent = `imagination started at step ${f.dream.originStep} (${f.dream.age} steps ago) · ` +
-      `imagined step +${f.dream.step}/${f.dream.of} · forward ${a[0].toFixed(2)} turn ${a[1].toFixed(2)} jump ${a[2].toFixed(2)}` +
-      (viewMode === "diff" ? " · blue = more active when imagined, white = more active in real play" : "");
-  } else {
-    brain.update(rates);
-    if ($("dream-info")) $("dream-info").textContent = viewMode === "live" ? "" : "waiting for the first imagined rollout…";
-  }
+  // 뇌 보기: 실제 / 상상 중 뇌 활동 (첫 상상이 끝나기 전에는 실제를 보여 줌)
+  brain.update(viewMode !== "live" && f.dream ? f.dream.rates : rates);
   if (setDN) init.out_neurons.forEach((n, i) => setDN[i](rates[n] / 255));
   if (setIn) {
     let j = 0;
@@ -604,8 +592,7 @@ function onFrame(f) {
     }
   }
 
-  setFood[0](f.obs[0]); setFood[1](f.obs[1]);
-  setCO2[0](f.obs[2]); setCO2[1](f.obs[3]);
+  if (setFood) { setFood[0](f.obs[0]); setFood[1](f.obs[1]); setCO2[0](f.obs[2]); setCO2[1](f.obs[3]); }
   drawEyes(f.obs);
   if (setAct) f.action.forEach((v, i) => setAct[i](v));
   history.reward.push(f.reward); history.total.push(f.total);
@@ -690,7 +677,7 @@ async function startLocal() {
     const corr = wmMap.axis_corr;
     wmMap.axis_names = [
       `PC1 · food nearby (r = ${corr["food odor"][0].toFixed(2)} with food odor)`,
-      `PC2 · danger (r = ${corr.looming[1].toFixed(2)} looming, ${corr.value[1].toFixed(2)} value)`,
+      `PC2 · danger (r = ${corr.looming[1].toFixed(2)} with looming)`,
     ];
     const q = (arr, p) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(p * (s.length - 1))]; };
     const xs = wmMap.points.map((p) => p[0]), ys = wmMap.points.map((p) => p[1]);
