@@ -44,6 +44,26 @@ header {
   flex-wrap: wrap;
   gap: 8px;
 }
+/* app.html 머리줄: 흰 바탕, 아래 칸과 같은 2 : 1 두 구역(사이 1px 줄). 왼쪽 = 그림 · 상세 칸용, 오른쪽 = 게임용 */
+header.split { display: grid; grid-template-columns: 2fr 1fr; gap: 1px; padding: 0; background: var(--line); flex-wrap: nowrap; align-items: stretch; }
+header.split .hz { background: var(--panel); display: flex; align-items: center; gap: 14px; padding: 8px 16px; min-width: 0; }
+header.split .hz-game { gap: 12px; flex-wrap: wrap; }
+header.split #status:empty { display: none; }
+/* 재생기 단추: 처음부터 · 재생/멈춤(검은 원) · 속도(점선 원 안에 배속) */
+.player { display: flex; align-items: center; gap: 6px; }
+.player .icon { width: 32px; height: 32px; padding: 0; border: none; border-radius: 50%; background: transparent; color: var(--text);
+  display: inline-flex; align-items: center; justify-content: center; position: relative; }
+.player .icon:hover { background: var(--well); }
+.player .icon svg { width: 21px; height: 21px; }
+.player .play { width: 38px; height: 38px; background: var(--real); color: #fff; }
+.player .play:hover { background: #3a3f4b; }
+.player .play svg { width: 20px; height: 20px; }
+.player .play .i-play, .player .play.paused .i-pause { display: none; }
+.player .play.paused .i-play { display: block; }
+.player .speed svg { position: absolute; inset: 4px; width: 24px; height: 24px; }
+.player .speed .v { font-size: 10px; font-weight: 700; letter-spacing: -0.3px; }
+header.split .seg button { padding: 4px 10px; }
+@media (max-width: 1100px) { header.split { grid-template-columns: 1fr; } }
 h1 { font-size: 16px; margin: 0; }
 h2 { font-size: 14px; margin: 0; }
 h3 { font-size: 12px; margin: 12px 0 6px; color: var(--muted); font-weight: 600; }
@@ -167,14 +187,44 @@ details.fold[open] summary { margin-bottom: 6px; }
 /* app.html 탐색 화면: 오른쪽 1/3 게임, 왼쪽 2/3을 위(월드모델)·아래(뇌)로 나누고, 각 절반은 상세 화면 + 층 구조 그림 */
 main.explorer { grid-template-columns: 2fr 1fr; }
 /* 왼쪽 2/3: [층 구조 그림 한 칸(위아래 전체)] [월드모델 상세(위) / 뇌 상세(아래)] */
-.explorer .left { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); grid-template-rows: 1fr 1fr; gap: 1px; background: var(--line); min-height: 0; min-width: 0; }
+.explorer .left { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); grid-template-rows: var(--wm-row, 1fr) 1fr; gap: 1px; background: var(--line); min-height: 0; min-width: 0; }
 .explorer .flow { grid-column: 1; grid-row: 1 / span 2; background: var(--panel); padding: 10px 8px; min-height: 0; display: flex; align-items: center; }
 .explorer .flow svg { width: 100%; height: 100%; max-height: 100%; display: block; }
 .explorer .flow text { font-family: "Segoe UI", system-ui, sans-serif; }
+.explorer .flow g { transition: opacity .15s; }
+/* 왼쪽 그림의 칸: 마우스를 올리면 바탕이 진해지고 테두리가 굵어진다 (--hov는 explorer.js가 칸마다 정함) */
+#flow-svg g.hit > :first-child { transition: fill .12s, stroke-width .12s; }
+#flow-svg g.hit:hover > :first-child { fill: var(--hov); stroke-width: 1.7; }
+/* 고르지 않은 칸은 흐리게, 상상 중 꺼진 칸(인코더 · 사후)은 더 흐리게. 흐린 칸도 마우스를 올리면 진해진다 */
+#flow-svg g.dim, #flow-svg g.off { opacity: .4; }
+#flow-svg g.dim.off { opacity: .16; }
+#flow-svg g.dim:hover { opacity: .85; }
+#flow-svg g.dim.off:hover { opacity: .45; }
+/* 고른 칸과 이어진 화살표: 점선이 화살표 방향으로 흐른다 */
+#flow-svg path.moving { stroke-dasharray: 7 5; animation: flow-dash .6s linear infinite; }
+@keyframes flow-dash { to { stroke-dashoffset: -12; } }
+@media (prefers-reduced-motion: reduce) { #flow-svg path.moving { animation: none; } }
 .explorer .half { grid-column: 2; display: flex; flex-direction: column; overflow: hidden; padding: 10px 14px; }
 .explorer .half .panel-head { margin-bottom: 6px; }
-.explorer .half.wm .panel-head h2 { color: var(--wm); }
-.explorer .half.br .panel-head h2 { color: var(--brain); }
+/* 오른쪽 상세 칸은 제목 대신 색으로 구분: 보라 = 월드모델, 청록 = 뇌 (explorer.js PUR.f · TEAL.f와 같은 색) */
+.explorer .half { position: relative; }
+.explorer .half.wm { background: #f1f0fd; }
+.explorer .half.br { background: #eaf7f2; }
+/* 넓은 화면: 맨 뒤 띠(#band-svg)가 왼쪽 틀과 오른쪽 칸을 한 덩어리로 칠하고, 칸 자체는 투명 */
+.explorer .left { position: relative; }
+.explorer .left > .bands { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: none; }
+.explorer .left.banded { background: var(--panel); }
+.explorer .left.banded > .bands { display: block; }
+.explorer .left.banded > .flow, .explorer .left.banded > .half { background: transparent; position: relative; z-index: 1; }
+/* 양옆 ‹ › 단추 자리만큼 좌우 여백 */
+.explorer .half { padding-left: 34px; padding-right: 36px; }
+.explorer .left.banded > .half.wm { padding: 18px 40px 14px 34px; }
+.explorer .left.banded > .half.br { padding: 16px 40px 22px 34px; }
+/* 보상 예측 값: 제목 줄이 없으니 칸 오른쪽 위에 띄움 */
+.explorer .half .panel-head.num-only { justify-content: flex-end; }
+/* 넓은 화면: 보상 예측 값은 월드모델 띠 오른쪽 위(상세 칸 첫 줄 높이)에. top은 explorer.js drawBands가 정한다 */
+.explorer .left.banded .panel-head.num-only { position: absolute; right: 40px; margin: 0; z-index: 2; }
+.explorer .left.banded #wmv-statemap h3 { padding-right: 195px; }
 .detail { flex: 1; min-height: 0; min-width: 0; overflow-y: auto; padding-right: 4px; }
 .detail .view h3:first-child { margin-top: 0; }
 .view.fill:not([hidden]) { display: flex; flex-direction: column; height: 100%; }
@@ -190,9 +240,9 @@ main.explorer { grid-template-columns: 2fr 1fr; }
 .xd-sense { margin: 6px 0 4px; }
 #wml-canvas, #brl-canvas { margin-top: 6px; }
 /* 계산 그림 + 옆 패널(Sensory의 감각 막대): 그림이 남는 폭을 쓰고 패널은 고정 폭 */
-.xd-row { display: flex; align-items: center; gap: 14px; }
+.xd-row { display: flex; align-items: center; gap: 12px; }
 .xd-row > canvas { flex: 1 1 0; min-width: 0; width: auto; }
-.xd-side { flex: 0 0 180px; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fafbfc; }
+.xd-side { flex: 0 0 164px; margin-top: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fafbfc; }
 .xd-side[hidden] { display: none !important; }
 .xd-side-title { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
 .xd-side .sense-row { grid-template-columns: 62px 1fr; font-size: 11.5px; }
@@ -204,6 +254,24 @@ main.explorer { grid-template-columns: 2fr 1fr; }
 .xd-steps svg { display: block; height: auto; max-width: 100%; }
 .xd-steps button { padding: 1px 9px; font-size: 11.5px; border-radius: 11px; }
 .xd-steps button.on { background: var(--real); color: #fff; border-color: var(--real); }
+/* 단계 구조도: 고르지 않은 단계는 흐리게, 양옆 ‹ › 단추로 이전 · 다음 단계 */
+.xd-steps { align-items: center; }
+.xd-steps g[data-k] { transition: opacity .15s; }
+.xd-steps g.dim { opacity: .4; }
+.xd-steps g.dim:hover { opacity: .75; }
+.explorer .half > .side-nav { position: absolute; top: 50%; transform: translateY(-50%); z-index: 3; width: 26px; height: 26px; padding: 0;
+  border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #fff; border: 1px solid #c9ced8;
+  box-shadow: 0 1px 3px rgba(27, 30, 38, .08); }
+.explorer .half > .side-nav.prev { left: 4px; }
+.explorer .half > .side-nav.next { right: 10px; }
+.explorer .half > .side-nav:hover:not(:disabled) { border-color: #8a919e; }
+.explorer .half > .side-nav svg { width: 14px; height: 14px; fill: none; stroke: var(--text); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.explorer .half > .side-nav:disabled { opacity: .3; cursor: default; }
+/* 단추는 층 계산 화면일 때만 (State map · Brain map 3D 화면에서는 숨김) */
+.explorer .half > .side-nav[hidden], .explorer .half:has(> .detail > .view[id$="-layer"][hidden]) > .side-nav { display: none; }
+/* 넘길 때 옆으로 밀리는 부분(수식 + 계산 그림). 옛 화면 사진(ghost)은 같은 부모 안에 겹쳐 놓는다 */
+.explorer .view[id$="-layer"] { position: relative; }
+.xd-slide { will-change: transform; }
 .xd-tex { font-size: 12.5px; min-height: 20px; margin: 3px 0 0; white-space: nowrap; overflow: hidden; color: var(--text); }
 .xd-tex .katex { font-size: 1.08em; }
 .xd-hov sub, .xd-text sub, .xd-note sub, .xd-head sub, #wm-num sub, h3 sub { font-size: 75%; line-height: 0; }
@@ -239,3 +307,37 @@ main.explorer { grid-template-columns: 2fr 1fr; }
 .legacy-banner { background: #3a2a10; color: #f0c850; font-size: 12px; padding: 6px 16px; border-bottom: 1px solid #5a4318; }
 .legacy-banner code { background: rgba(0,0,0,.3); padding: 0 4px; border-radius: 3px; }
 .legacy-banner a { color: #ffd979; }
+
+/* ---------- 범례 창 (legend.js) ---------- */
+.legend-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px 4px 8px; }
+.legend-btn svg { width: 15px; height: 15px; }
+#legend-dlg { width: min(900px, 94vw); max-height: 88vh; padding: 0; border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(27, 30, 38, .28); color: var(--text); background: var(--panel); overflow: hidden; }
+#legend-dlg::backdrop { background: rgba(27, 30, 38, .35); }
+#legend-dlg[open] { display: flex; flex-direction: column; }
+.lg-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.lg-head h2 { font-size: 15px; }
+.lg-close { border: none; background: transparent; font-size: 15px; padding: 2px 8px; color: var(--muted); }
+.lg-close:hover { color: var(--text); background: var(--well); }
+.lg-body { padding: 14px 18px 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px 28px; overflow-y: auto; }
+.lg-body section.wide { grid-column: 1 / -1; }
+.lg-body h3 { margin: 0 0 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
+.lg-row { display: grid; grid-template-columns: 36px 1fr; gap: 8px; align-items: center; font-size: 12.5px; padding: 2.5px 0; }
+.lg-sw { display: block; width: 14px; height: 14px; border-radius: 3px; justify-self: center; }
+.lg-dot { border-radius: 50%; }
+.lg-line { width: 34px; height: 10px; justify-self: center; }
+.lg-body .legend { flex-direction: column; gap: 4px; margin: 0; font-size: 12.5px; color: var(--text); }
+.lg-sym { display: grid; grid-template-columns: max-content 1fr max-content 1fr; gap: 5px 14px; align-items: baseline; font-size: 12.5px; }
+.lg-tex { text-align: right; white-space: nowrap; }
+.lg-tex .katex { font-size: 1.05em; }
+@media (max-width: 760px) { .lg-body { grid-template-columns: 1fr; } .lg-sym { grid-template-columns: max-content 1fr; } }
+
+/* 공통 색 눈금 막대: 각 칸(월드모델 · 뇌) 오른쪽 아래 구석. 층 계산 화면일 때만 보인다 */
+.explorer .half > .xd-scale { position: absolute; right: 40px; bottom: 12px; width: 176px; z-index: 2; pointer-events: none; }
+.explorer .half.br > .xd-scale { bottom: 20px; }
+.explorer .half:has(> .detail > .view[id$="-layer"][hidden]) > .xd-scale { display: none; }
+.xd-scale .bar { height: 6px; border: 1px solid #b8bec9; border-radius: 1px; }
+.xd-scale .bar.hue { height: 4px; margin: 1px 0 0 50%; }   /* 감각 · 행동 색: 0 ~ 4 (회색 막대의 오른쪽 절반) */
+.xd-scale .ticks { position: relative; height: 13px; font-size: 9.5px; color: var(--muted); }
+.xd-scale .ticks span { position: absolute; top: 3px; transform: translateX(-50%); white-space: nowrap; line-height: 1; }
+.xd-scale .ticks span::before { content: ""; position: absolute; left: 50%; top: -4px; width: 1px; height: 3px; background: #8a919e; }

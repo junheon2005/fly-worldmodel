@@ -171,9 +171,13 @@ export class WMExplain {
     return { steps, recon };
   }
 
-  // 보상 예측 r̂_t = symexp(Σ_k softmax(logits)_k · b_k)
-  reward(h, z) {
-    const steps = this.mlp("reward_head", this.feat(h, z), 2);
+  // 보상 예측 r̂_t = symexp(Σ_k softmax(ℓ^r)_k · β_k)
+  reward(h, z) { return this.twohotHead("reward_head", h, z); }
+  // 앞으로 받을 보상 합(return) 예측 R̂_t = symexp(Σ_k softmax(ℓ^R)_k · β_k). critic 망 (에이전트 쪽, 상상 속에서 학습)
+  ret(h, z) { return this.twohotHead("critic", h, z); }
+  // 두 은닉층 MLP → 255 구간 logits → 확률 → symlog 평균 → symexp
+  twohotHead(name, h, z) {
+    const steps = this.mlp(name, this.feat(h, z), 2);
     const logits = steps[2].pre;
     let mx = -Infinity;
     for (const v of logits) mx = Math.max(mx, v);

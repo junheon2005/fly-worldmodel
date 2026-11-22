@@ -261,17 +261,18 @@ export class LocalSession {
       clamped: [...this.clamped],
     };
     // 꿈 재생: 마지막으로 완성된 상상 궤적의 뇌 활동을 한 스텝씩 돌려 보여 줌
-    if (im?.rates?.length) {
-      const k = this.frameCount % im.rates.length;
-      // 상상 k스텝: 상태 k의 복원 감각(obs) → 뇌 → 행동 → 다음 상태 k+1 (h, z, prior) → 보상·계속·가치
-      frame.dream = { rates: im.rates[k], step: k + 1, of: im.rates.length, obs: im.obs[k], action: im.action[k],
-                      originStep: im.originStep, age: t - im.originStep,
-                      h: im.hz?.[k + 1]?.[0], z: im.hz?.[k + 1]?.[1], prior: im.prior?.[k],
-                      h_prev: im.hz?.[k]?.[0], z_prev: im.hz?.[k]?.[1], io: im.io?.[k],
-                      reward: im.reward?.[k], cont: im.cont?.[k], value: im.value?.[k + 1] };
-    }
+    if (im?.rates?.length) frame.dream = this.dreamAt(im, this.frameCount % im.rates.length, t);
     if (terminal) this.reset();
     return frame;
+  }
+
+  // 상상 k스텝: 상태 k의 복원 감각(obs) → 뇌 → 행동 → 다음 상태 k+1 (h, z, prior) → 보상·계속·가치
+  dreamAt(im, k, t) {
+    return { rates: im.rates[k], step: k + 1, of: im.rates.length, obs: im.obs[k], action: im.action[k],
+             originStep: im.originStep, age: t - im.originStep,
+             h: im.hz?.[k + 1]?.[0], z: im.hz?.[k + 1]?.[1], prior: im.prior?.[k],
+             h_prev: im.hz?.[k]?.[0], z_prev: im.hz?.[k]?.[1], io: im.io?.[k],
+             reward: im.reward?.[k], cont: im.cont?.[k], value: im.value?.[k + 1] };
   }
 
   // 프레임마다 onFrame 호출. 계산이 늦어도 프레임이 겹치지 않게 순차 실행
@@ -304,6 +305,7 @@ export class LocalSession {
       imagined: this.imagined,
       dream: { rates: t.rates.at(-1), step: t.rates.length, of: t.rates.length, action: t.action.at(-1),
                originStep: im.originStep, age: 0 },
+      dreamFrame: this.dreamAt(this.imagined, 0, shown.step),   // 계산 화면(상상 모드)에 보일 첫 상상 스텝
     };
   }
 

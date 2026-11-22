@@ -21,9 +21,43 @@ const FRAME = "#7d8492", FRAME_W = 1.5;            // 행렬·벡터 테두리
 const NAME_SIZE = 13, OP_INK = "#2b303b";          // 위 이름 글자, 계산 기호 색
 const LIGHT = [250, 250, 251];
 const signedCol = (v) => shade(PAL.real, 0.5 + 0.46 * Math.max(-1, Math.min(1, v || 0)), LIGHT);   // −1 밝음 … +1 진함
-const unitCol = (v) => shade(PAL.real, 0.92 * Math.max(0, Math.min(1, v || 0)));
+// 모든 칸이 같은 색 눈금을 쓴다 (같은 색 = 같은 값). 가중치는 ±0.1 안팎, 은닉값은 ±4 안팎이라
+// 0 근처는 촘촘하고 큰 값은 줄이는 symlog 눈금: f(v) = sign(v)·log(1 + |v|/C) / log(1 + S/C), |v| ≥ S는 끝 색.
+// 칸 오른쪽 아래 구석의 막대(scaleBarHTML)가 이 눈금을 보여 준다
+export const SCALE = { S: 4, C: 0.05 };
+const LOG_S = Math.log1p(SCALE.S / SCALE.C);
+export const fScale = (v) => Math.max(-1, Math.min(1, Math.sign(v || 0) * Math.log1p(Math.abs(v || 0) / SCALE.C) / LOG_S));
+const valCol = (v) => signedCol(fScale(v));                                  // 회색: 음수 밝음 · 0 중간 · 양수 진함
+const hueCol = (c, v) => shade(c, Math.max(0, fScale(v)));                   // 감각 · 행동 색: 0 옅은 회색 → 클수록 그 색
+// 눈금 막대 (HTML): 회색 띠와 −4, −1, −0.1, 0, 0.1, 1, 4 눈금
+// 회색 막대(−4 ~ 4) 아래에, 이 단계에 감각 · 행동 색 칸이 있으면 그 색마다 막대를 하나씩(0 ~ 4, 회색 막대의 오른쪽 절반에 맞춤).
+// 색 칸의 값은 0 이상이라 오른쪽 절반만 쓰고, 눈금은 회색 막대와 같은 자리
+export function scaleBarHTML({ gray = true, colors = [] } = {}) {
+  const ticks = gray ? [-4, -1, -0.1, 0, 0.1, 1, 4] : [0, 0.1, 1, 4];
+  const lab = (v) => (v < 0 ? "−" : "") + Math.abs(v);
+  return (gray ? `<div class="bar" style="background:linear-gradient(90deg, ${signedCol(-1)}, ${signedCol(0)}, ${signedCol(1)})"></div>` : "") +
+    colors.map((c) => `<div class="bar hue" style="background:linear-gradient(90deg, ${shade(c, 0)}, ${shade(c, 1)})"></div>`).join("") +
+    `<div class="ticks">${ticks.map((v) => `<span style="left:${((fScale(v) + 1) / 2) * 100}%">${lab(v)}</span>`).join("")}</div>`;
+}
 const SENSE = (i) => (i < 2 ? PAL.food : i < 4 ? PAL.co2 : PAL.pred);
 const ACT = (i) => (i < 2 ? PAL.action : PAL.jump);
+// 한 단계의 그림에 회색 칸이 있는지, 어떤 색 칸이 있는지 (구석 눈금 막대에 넣을 것)
+export function scaleInfo(items) {
+  let gray = false;
+  const cols = new Map(), add = (c) => cols.set(c.join(","), c);
+  for (const it of items || []) {
+    if (it.t === "vec") {
+      if (it.hue) for (let i = 0; i < it.v.length; i++) add(it.hue(i));
+      else if (it.kind === "obs") [PAL.food, PAL.co2, PAL.pred].forEach(add);
+      else if (it.kind === "act") [PAL.action, PAL.jump].forEach(add);
+      else gray = true;
+    } else if (it.t === "mat" && !it.m.img) {
+      if (it.m.hue) for (let j = 0; j < it.m.cols; j++) add(it.m.hue(0, j));
+      else gray = true;
+    } else if (it.t === "grid") gray = true;
+  }
+  return { gray, colors: [...cols.values()] };
+}
 
 // ---------- 글자: h_t, W^{(1)}, h_{t−1} 같은 아래·위 첨자 ----------
 export function parse(s) {
@@ -67,32 +101,25 @@ export function label(ctx, x, y, s, { size = 11.5, color = INK, align = "center"
 
 // ---------- 행렬 그림 (한 번만 만들어 둠) ----------
 const matCache = new WeakMap();
-function robustScale(data) {
-  const n = data.length, step = Math.max(1, Math.floor(n / 4000)), s = [];
-  for (let i = 0; i < n; i += step) s.push(Math.abs(data[i]));
-  s.sort((a, b) => a - b);
-  return s[Math.floor(s.length * 0.98)] || 1;
-}
 export function matrixImage(m) {
   if (m.img) return m.img;
   let c = matCache.get(m.data);
   if (c) return c;
   c = document.createElement("canvas");
   c.width = m.cols; c.height = m.rows;
-  const g = c.getContext("2d"), img = g.createImageData(m.cols, m.rows), sc = robustScale(m.data);
+  const g = c.getContext("2d"), img = g.createImageData(m.cols, m.rows);
   for (let k = 0; k < m.rows * m.cols; k++) {
     if (m.hue) {
-      // 감각 색: 0 = 옅은 회색, 클수록 그 칸 감각의 색
-      const t = Math.max(0, Math.min(1, m.data[k] / sc)), col = t > 0 ? m.hue(Math.floor(k / m.cols), k % m.cols) : PALE;
+      // 감각 색: 0 = 옅은 회색, 클수록 그 칸 감각의 색 (공통 눈금)
+      const t = Math.max(0, fScale(m.data[k])), col = t > 0 ? m.hue(Math.floor(k / m.cols), k % m.cols) : PALE;
       for (let ch = 0; ch < 3; ch++) img.data[4 * k + ch] = Math.round(PALE[ch] + (col[ch] - PALE[ch]) * t);
     } else {
-      const t = 0.5 + 0.46 * Math.max(-1, Math.min(1, m.data[k] / sc));
+      const t = 0.5 + 0.46 * fScale(m.data[k]);
       for (let ch = 0; ch < 3; ch++) img.data[4 * k + ch] = Math.round(LIGHT[ch] + (PAL.real[ch] - LIGHT[ch]) * t);
     }
     img.data[4 * k + 3] = 255;
   }
   g.putImageData(img, 0, 0);
-  c._scale = sc;
   matCache.set(m.data, c);
   return c;
 }
@@ -100,9 +127,9 @@ export function matrixImage(m) {
 // ---------- 배치 ----------
 const isSmall = (n) => n <= 8;
 const measureCtx = document.createElement("canvas").getContext("2d");
-// opt.vecBrace: 벡터 길이를 오른쪽 중괄호로(true) / 아래 숫자로(false). opt.compact: 칸 상자를 작은 글자·좁은 칸으로
+// opt.compact: 칸 상자를 작은 글자·좁은 칸으로
 function layout(items, W, Hm, opt = {}) {
-  const vecBrace = opt.vecBrace !== false, compact = !!opt.compact;
+  const compact = !!opt.compact;
   const maxDim = Math.max(8, ...items.flatMap((it) =>
     it.t === "vec" ? [isSmall(it.v.length) ? 0 : it.v.length] : it.t === "mat" ? [isSmall(it.m.rows) ? 0 : it.m.rows, isSmall(it.m.cols) ? 0 : it.m.cols] : [0]));
   const k = Hm / maxDim, cell = Math.min(24, Hm / 6);   // 숫자 칸 높이: 자리가 있으면 24까지
@@ -126,32 +153,29 @@ function layout(items, W, Hm, opt = {}) {
     if (it.t === "num") { ctx.font = "13px Segoe UI"; return { w: Math.max(44, ctx.measureText(it.text).width + 14), h: 26 }; }
     return { w: 0, h: 0 };
   });
-  // 위 이름, 왼쪽 구간 이름, 차원 중괄호가 들어갈 자리를 둔다
+  // 위 이름, 왼쪽 구간 이름, 아래 차원 순서쌍이 들어갈 자리를 둔다
   boxes.forEach((b, i) => {
     const it = items[i];
     if (it.label) b.lw = measure(ctx, it.label, NAME_SIZE, "600");
     if (it.segs) b.padL = 16 + Math.max(...it.segs.map((s) => measure(ctx, s.label, SEG_FONT)));   // 왼쪽 구간 이름 자리
-    b.dims = dimsOf(it, vecBrace);
-    if (b.dims.left != null) b.padL = (b.padL || 0) + dimPad(ctx, b.dims.left);
-    if (b.dims.right != null) b.padR = dimPad(ctx, b.dims.right);
-    b.slot = Math.max(b.w, (b.lw || 0) * 0.9) + (b.padL || 0) + (b.padR || 0);
-    if (b.dims.below != null) b.slot = Math.max(b.slot, dimPad(ctx, b.dims.below) - 2 * BR - 5);   // 아래 숫자가 벡터보다 넓을 때
+    b.dims = dimsOf(it);
+    b.slot = Math.max(b.w, (b.lw || 0) * 0.9) + (b.padL || 0);
+    if (b.dims) { ctx.font = `${DIM_FONT}px Segoe UI`; b.dimW = ctx.measureText(b.dims).width + 4; }
   });
+  // 순서쌍이 상자보다 넓으면 자리를 넓힌다. 옆이 아래 글자가 없는 기호(+, =, 화살표)면 그 아래 빈 곳까지 걸쳐 쓴다
+  const free = (j) => (j < 0 || j >= boxes.length || boxes[j].dims ? 3 : boxes[j].slot / 2 + 4);
+  boxes.forEach((b, i) => { if (b.dims) b.slot = Math.max(b.slot, (b.padL || 0) + b.dimW - 2 * Math.min(free(i - 1), free(i + 1))); });
   const total = boxes.reduce((s, b) => s + b.slot, 0) + 6 * (items.length - 1);
   return { boxes, total, k };
 }
-// 차원 표시: 행렬은 왼쪽 중괄호(행 수)와 아래 중괄호(열 수), 벡터는 오른쪽 중괄호(길이).
-// 폭이 모자란 화면에서는 벡터 길이를 중괄호 대신 벡터 바로 아래 숫자로 쓴다 (vecBrace = false, drawCompute가 고름)
-const DIM_FONT = 9.5, BR = 3;
-const dimText = (n) => (n >= 10000 && n % 1000 === 0 ? `${n / 1000}k` : n.toLocaleString());   // 15000 → 15k (자리 절약)
-function dimsOf(it, vecBrace) {
-  if (it.t === "mat") return { left: it.m.rows, bottom: it.m.cols };
-  if (it.t === "vec" && !isSmall(it.v.length)) return vecBrace ? { right: it.v.length } : { below: it.v.length };
-  return {};
-}
-function dimPad(ctx, n) {
-  ctx.font = `${DIM_FONT}px Segoe UI`;
-  return 2 * BR + 7 + ctx.measureText(dimText(n)).width;
+// 차원 표시: 행렬 · 벡터 바로 아래에 순서쌍 (행 수, 열 수). 벡터는 세로 한 줄이라 (길이, 1).
+// 천 단위 쉼표는 순서쌍의 쉼표와 헷갈리므로 쓰지 않고, 만 이상은 k로 줄인다 (15000 → 15k)
+const DIM_FONT = 10;
+const dimNum = (n) => (n >= 10000 && n % 1000 === 0 ? `${n / 1000}k` : String(n));
+function dimsOf(it) {
+  if (it.t === "mat") return `(${dimNum(it.m.rows)}, ${dimNum(it.m.cols)})`;
+  if (it.t === "vec") return `(${dimNum(it.v.length)}, 1)`;
+  return null;
 }
 
 // ---------- 그리기 ----------
@@ -159,8 +183,8 @@ function dimPad(ctx, n) {
 export function drawCompute(cv, spec, maxH) {
   const dpr = window.devicePixelRatio || 1;
   const W = Math.max(280, cv.clientWidth || cv.parentElement.clientWidth || 600);
-  const Hm0 = Math.max(40, Math.min(190, maxH - 46));   // 46 = 위아래 글자 자리 (아래 H 참고)
-  // 폭이 넘치면 높이(=크기)를 줄인다. 중괄호·이름·칸 상자 폭은 높이와 상관없이 고정이라 이분 탐색으로 맞는 높이를 찾는다
+  const Hm0 = Math.max(40, Math.min(190, maxH - 40));   // 40 = 위아래 글자 자리 (아래 H 참고)
+  // 폭이 넘치면 높이(=크기)를 줄인다. 이름·순서쌍·칸 상자 폭은 높이와 상관없이 고정이라 이분 탐색으로 맞는 높이를 찾는다
   const fit = (opt) => {
     const room = W - 14;   // 양옆 7px 여유
     let L = layout(spec.items, W, Hm0, opt);
@@ -170,22 +194,22 @@ export function drawCompute(cv, spec, maxH) {
     L = layout(spec.items, W, lo, opt);
     return { Hm: lo, L, opt, fits: L.total <= room };
   };
-  // 차례로: 벡터 중괄호 → 벡터 길이를 아래 숫자로 → 칸 상자를 작게. 그림이 충분히 큰(원래의 80%, 적어도 90) 첫 방식을 쓴다.
+  // 차례로: 보통 칸 상자 → 칸 상자를 작게. 그림이 충분히 큰(원래의 80%, 적어도 90) 첫 방식을 쓴다.
   // 모두 안 되면 작은 방식 그대로 전체를 비율로 줄여 그린다 (글자도 함께 작아짐)
   const want = Math.min(Hm0, Math.max(90, Hm0 * 0.8));
   let best = null;
-  for (const opt of [{ vecBrace: true }, { vecBrace: false }, { vecBrace: false, compact: true }]) {
+  for (const opt of [{}, { compact: true }]) {
     const f = fit(opt);
     if (f.fits && f.Hm >= want) { best = f; break; }
   }
   let s = 1;
   if (!best) {
-    const opt = { vecBrace: false, compact: true }, Hb = Math.min(Hm0, 110), L = layout(spec.items, W, Hb, opt);
+    const opt = { compact: true }, Hb = Math.min(Hm0, 110), L = layout(spec.items, W, Hb, opt);
     s = Math.min(1, (W - 14) / L.total);
     best = { Hm: Hb, L, opt };
   }
-  // 캔버스 높이는 실제 그림 높이(가장 큰 상자)에 맞춘다. 위 22: 굵은 이름(위첨자 포함), 아래 24: 행렬 아래 중괄호와 열 수
-  const L = best.L, Hc = Math.max(26, ...L.boxes.map((b) => b.h)), H = Hc + 46, top = 22, mid = top + Hc / 2;
+  // 캔버스 높이는 실제 그림 높이(가장 큰 상자)에 맞춘다. 위 22: 굵은 이름(위첨자 포함), 아래 18: 차원 순서쌍
+  const L = best.L, Hc = Math.max(26, ...L.boxes.map((b) => b.h)), H = Hc + 40, top = 22, mid = top + Hc / 2;
   // 자리가 남으면(가로·세로 모두) 그림 전체를 비율로 키운다. 최대 1.5배
   if (s === 1) s = Math.max(1, Math.min(1.5, (W - 14) / L.total, maxH / H));   // 양옆 7px 여유 (두꺼운 테두리가 끝에 닿지 않게)
   const Wl = W / s;   // Wl: 비율로 그릴 때의 논리 폭
@@ -204,7 +228,7 @@ export function drawCompute(cv, spec, maxH) {
   const placed = [];
   let x = Math.max(0, (Wl - L.total) / 2);
   spec.items.forEach((it, idx) => {
-    const b = L.boxes[idx], pl = b.padL || 0, pr = b.padR || 0, bx = x + pl + (b.slot - pl - pr - b.w) / 2, by = mid - b.h / 2;
+    const b = L.boxes[idx], pl = b.padL || 0, bx = x + pl + (b.slot - pl - b.w) / 2, by = mid - b.h / 2;
     const p = { it, x: bx, y: by, w: b.w, h: b.h, compact: !!best.opt.compact };
     if (it.t === "vec" && it.cells) p.rows = cellRows(it.v.length, b.h, it.cells).map(([a, c]) => [by + a, by + c]);
     placed.push(p);
@@ -244,18 +268,15 @@ function drawOp(ctx, s, cx, cy) {
   ctx.fillText(s, cx, cy + 7);
 }
 // 벡터 값 → 칸 색
-function cellColor(it, i, v, sc) {
-  if (it.hue) return shade(it.hue(i), Math.max(0, v) / sc);
-  if (it.kind === "obs") return shade(SENSE(i), v);
-  if (it.kind === "act") return shade(ACT(i), Math.abs(v));
-  if (it.kind === "unit" || it.kind === "onehot") return unitCol(v);
-  return signedCol(v / sc);
+// 칸 색 (공통 눈금): 감각 · 행동 값은 그 색의 진하기, 나머지는 회색
+function cellColor(it, i, v) {
+  if (it.hue) return hueCol(it.hue(i), v);
+  if (it.kind === "obs") return hueCol(SENSE(i), v);
+  if (it.kind === "act") return hueCol(ACT(i), Math.abs(v));
+  return valCol(v);
 }
-function vecScale(v) {
-  let m = 0;
-  for (let i = 0; i < v.length; i++) m = Math.max(m, Math.abs(v[i]));
-  return m || 1;
-}
+// 칸 안 숫자 글자색: 바탕이 진하면 흰 글자
+const darkCell = (it, v) => (it.t !== "mat" && (it.hue || it.kind === "obs" || it.kind === "act") ? fScale(Math.abs(v)) > 0.6 : fScale(v) > 0.25);
 // cells가 있을 때 칸마다 [위, 아래] (벡터 위쪽 기준). 큰 칸은 작은 칸의 4배, 단 글자가 들어가게 최소 MIN_BIG
 const GAP = 5, MIN_BIG = 12;
 function cellRows(n, h, cells) {
@@ -275,14 +296,14 @@ function cellRows(n, h, cells) {
   return rows;
 }
 function drawVec(ctx, p, hv) {
-  const { it, x, y, w, h } = p, v = it.v, n = v.length, sc = it.scale || vecScale(v);
+  const { it, x, y, w, h } = p, v = it.v, n = v.length;
   if (p.rows) {
     // 고르지 않은 칸: 칸마다 칠하고, 간격으로 나뉜 묶음마다 테두리
     const gaps = new Set(it.cells.gapsBefore || []);
     let start = 0;
     for (let i = 0; i < n; i++) {
       const [a, b] = p.rows[i];
-      ctx.fillStyle = cellColor(it, i, v[i], sc);
+      ctx.fillStyle = cellColor(it, i, v[i]);
       ctx.fillRect(x, a, w, Math.max(b - a - (b - a > 3 ? 0.6 : 0), 0.8));
       if (i === n - 1 || gaps.has(i + 1)) {
         ctx.strokeStyle = FRAME; ctx.lineWidth = FRAME_W;
@@ -298,12 +319,11 @@ function drawVec(ctx, p, hv) {
   }
   if (n <= h) {
     const ch = h / n;
-    for (let i = 0; i < n; i++) { ctx.fillStyle = cellColor(it, i, v[i], sc); ctx.fillRect(x, y + i * ch, w, Math.max(ch - (ch > 3 ? 0.6 : 0), 0.8)); }
+    for (let i = 0; i < n; i++) { ctx.fillStyle = cellColor(it, i, v[i]); ctx.fillRect(x, y + i * ch, w, Math.max(ch - (ch > 3 ? 0.6 : 0), 0.8)); }
     if (isSmall(n)) {
       ctx.font = "10.5px Segoe UI"; ctx.textAlign = "center";
       for (let i = 0; i < n; i++) {
-        const t = Math.abs(it.kind === "act" ? v[i] : v[i] / sc);
-        ctx.fillStyle = t > 0.55 ? "#fff" : INK;
+        ctx.fillStyle = darkCell(it, v[i]) ? "#fff" : INK;
         ctx.fillText((v[i] < 0 ? "−" : "") + Math.abs(v[i]).toFixed(2), x + w / 2, y + (i + 0.5) * ch + 3.5);
       }
     }
@@ -314,7 +334,7 @@ function drawVec(ctx, p, hv) {
       const a = Math.floor((r * n) / rows), b = Math.max(a + 1, Math.floor(((r + 1) * n) / rows));
       let s = 0;
       for (let i = a; i < b; i++) s += v[i];
-      ctx.fillStyle = cellColor(it, a, s / (b - a), sc);
+      ctx.fillStyle = cellColor(it, a, s / (b - a));
       ctx.fillRect(x, y + (r * h) / rows, w, h / rows + 0.4);
     }
   }
@@ -333,17 +353,10 @@ function symCellW(ctx, compact) {
   return compact ? Math.max(30, ctx.measureText("−0.00").width + 6) : Math.max(38, ctx.measureText("−0.00").width + 12);
 }
 const symColW = (n, cw, compact) => symIdx(n).map((j) => (j < 0 ? ellW(compact) : cw));
-const matScale = new WeakMap();
-function scaleOfMat(m) {
-  let s = matScale.get(m.data);
-  if (s == null) { s = robustScale(m.data); matScale.set(m.data, s); }
-  return s;
-}
-function numCell(ctx, it, x, y, w, h, v, sc, i) {
-  ctx.fillStyle = it.t === "mat" ? signedCol(v / sc) : cellColor(it, i, v, sc);
+function numCell(ctx, it, x, y, w, h, v, i) {
+  ctx.fillStyle = it.t === "mat" ? valCol(v) : cellColor(it, i, v);
   ctx.fillRect(x, y, w - 0.6, h - 0.6);
-  const t = it.kind === "unit" ? v : Math.abs(v / sc);
-  ctx.fillStyle = t > 0.55 ? "#fff" : INK;
+  ctx.fillStyle = darkCell(it, v) ? "#fff" : INK;
   ctx.textAlign = "center";
   ctx.fillText(fmt2(v), x + w / 2, y + h / 2 + 3.6);
 }
@@ -355,13 +368,13 @@ function drawSym(ctx, p, hv) {
   const { it, x, y, w, h } = p, font = `${p.compact ? NUM_FONT_C : NUM_FONT}px Segoe UI`;
   ctx.font = font;
   if (it.t === "vec") {
-    const rows = symIdx(it.v.length), ch = h / rows.length, sc = it.scale || vecScale(it.v);
-    rows.forEach((i, r) => (i < 0 ? ellCell(ctx, x, y + r * ch, w, ch, "⋮") : numCell(ctx, it, x, y + r * ch, w, ch, it.v[i], sc, i)));
+    const rows = symIdx(it.v.length), ch = h / rows.length;
+    rows.forEach((i, r) => (i < 0 ? ellCell(ctx, x, y + r * ch, w, ch, "⋮") : numCell(ctx, it, x, y + r * ch, w, ch, it.v[i], i)));
     ctx.strokeStyle = FRAME; ctx.lineWidth = FRAME_W; ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
     if (hv && it.space && hv.space === it.space) { const r = symRow(rows, hv.idx); if (r >= 0) outline(ctx, x - 1.5, y + r * ch - 1, w + 3, ch + 2); }
     return;
   }
-  const m = it.m, rows = symIdx(m.rows), cols = symIdx(m.cols), ch = h / rows.length, cws = symColW(m.cols, symCellW(ctx, p.compact), p.compact), sc = scaleOfMat(m);
+  const m = it.m, rows = symIdx(m.rows), cols = symIdx(m.cols), ch = h / rows.length, cws = symColW(m.cols, symCellW(ctx, p.compact), p.compact);
   ctx.font = font;
   const cx = cws.map((_, c) => x + cws.slice(0, c).reduce((a, b) => a + b, 0));
   rows.forEach((i, r) => cols.forEach((j, c) => {
@@ -369,7 +382,7 @@ function drawSym(ctx, p, hv) {
     if (i < 0 && j < 0) ellCell(ctx, cx[c], yy, cws[c], ch, "⋱");
     else if (i < 0) ellCell(ctx, cx[c], yy, cws[c], ch, "⋮");
     else if (j < 0) ellCell(ctx, cx[c], yy, cws[c], ch, "…");
-    else numCell(ctx, it, cx[c], yy, cws[c], ch, m.data[i * m.cols + j], sc, i);
+    else numCell(ctx, it, cx[c], yy, cws[c], ch, m.data[i * m.cols + j], i);
   }));
   ctx.strokeStyle = FRAME; ctx.lineWidth = FRAME_W; ctx.strokeRect(x - 0.5, y - 0.5, w + 1, h + 1);
   if (!hv) return;
@@ -383,41 +396,11 @@ function symRow(idx, k) {
   const e = idx.indexOf(-1);
   return e >= 0 && k > idx[e - 1] && k < idx[e + 1] ? e : -1;
 }
-// 차원 중괄호와 숫자
-function braceV(ctx, x0, y0, y1, dir) {   // dir +1: 오른쪽으로 뾰족, −1: 왼쪽으로
-  const d = Math.min(BR, (y1 - y0) / 4), m = (y0 + y1) / 2, a = x0 + dir * d, t = x0 + dir * 2 * d;
-  ctx.beginPath();
-  ctx.moveTo(x0, y0); ctx.quadraticCurveTo(a, y0, a, y0 + d); ctx.lineTo(a, m - d);
-  ctx.quadraticCurveTo(a, m, t, m); ctx.quadraticCurveTo(a, m, a, m + d);
-  ctx.lineTo(a, y1 - d); ctx.quadraticCurveTo(a, y1, x0, y1);
-  ctx.stroke();
-}
-function braceH(ctx, x0, x1, y0) {         // 아래로 뾰족
-  const d = Math.min(BR, (x1 - x0) / 4), m = (x0 + x1) / 2, a = y0 + d, t = y0 + 2 * d;
-  ctx.beginPath();
-  ctx.moveTo(x0, y0); ctx.quadraticCurveTo(x0, a, x0 + d, a); ctx.lineTo(m - d, a);
-  ctx.quadraticCurveTo(m, a, m, t); ctx.quadraticCurveTo(m, a, m + d, a);
-  ctx.lineTo(x1 - d, a); ctx.quadraticCurveTo(x1, a, x1, y0);
-  ctx.stroke();
-}
+// 차원 순서쌍: 상자 바로 아래 가운데
 function drawDims(ctx, p, dm) {
   if (!dm) return;
-  const { x, y, w, h } = p;
-  ctx.strokeStyle = "#9aa1ad"; ctx.lineWidth = 0.9;
-  ctx.fillStyle = SUB; ctx.font = `${DIM_FONT}px Segoe UI`;
-  if (dm.left != null) {
-    braceV(ctx, x - 3, y, y + h, -1);
-    ctx.textAlign = "right"; ctx.fillText(dimText(dm.left), x - 3 - 2 * BR - 3, y + h / 2 + 3.5);
-  }
-  if (dm.right != null) {
-    braceV(ctx, x + w + 3, y, y + h, 1);
-    ctx.textAlign = "left"; ctx.fillText(dimText(dm.right), x + w + 3 + 2 * BR + 3, y + h / 2 + 3.5);
-  }
-  if (dm.bottom != null) {
-    braceH(ctx, x, x + w, y + h + 3);
-    ctx.textAlign = "center"; ctx.fillText(dimText(dm.bottom), x + w / 2, y + h + 3 + 2 * BR + 10);
-  }
-  if (dm.below != null) { ctx.textAlign = "center"; ctx.fillText(dimText(dm.below), x + w / 2, y + h + 13); }
+  ctx.fillStyle = SUB; ctx.font = `${DIM_FONT}px Segoe UI`; ctx.textAlign = "center";
+  ctx.fillText(dm, p.x + p.w / 2, p.y + p.h + 13);
 }
 // 벡터 왼쪽 구간 이름: 글자가 겹치지 않게 위에서부터 차례로 내려 놓는다
 const SEG_FONT = 10;
@@ -446,7 +429,7 @@ function drawSegs(ctx, p) {
 function drawGrid(ctx, p, hv) {
   const { it, x, y, w } = p, v = it.v, c = w / 16;
   for (let i = 0; i < 256; i++) {
-    ctx.fillStyle = it.kind === "signed" ? signedCol((v[i] || 0) / vecScale(v)) : unitCol(v[i]);
+    ctx.fillStyle = valCol(v[i] || 0);
     ctx.fillRect(x + (i % 16) * c, y + Math.floor(i / 16) * c, c - 0.5, c - 0.5);
   }
   ctx.strokeStyle = FRAME; ctx.lineWidth = FRAME_W; ctx.strokeRect(x - 0.5, y - 0.5, w + 1, w + 1);

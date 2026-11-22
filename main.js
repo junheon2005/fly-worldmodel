@@ -3,6 +3,7 @@
 import { createBrainView, GROUP_SWATCH, GROUP_LABELS, LEGEND } from "./brain.js";
 import { setupExplorer, explorerFrame } from "./explorer.js";
 import { PAL, rgb, shade } from "./palette.js";
+import { setupLegend } from "./legend.js";
 
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -16,6 +17,7 @@ let viewMode = "live";          // 뇌 보기: live(실제) / dream(상상 중 �
 let pins = new Map();           // 월드모델 믿음 고정: z 범주 → 칸
 let zLayout = null;             // z 격자 칸 크기 (클릭 위치 계산용)
 let lastRates = null;           // 마지막 실제 뇌 발화율 (일시정지 중 비교용)
+let lastFrame = null;           // 마지막 프레임 (멈춘 채 시작할 때 상상 결과를 붙여 계산 화면에 다시 넘김)
 let lastZ = null;               // 마지막 z 확률 (믿음 저장용)
 let savedBelief = null;
 let lastObs = [];
@@ -450,8 +452,11 @@ function drawWM(wm) {
     if (mapTrail.length > 60) mapTrail.shift();
     drawStateMap(cur, wm.imagined);
   }
-  $("wm-num").innerHTML = `predicted r̂<sub>t</sub> ${wm.reward_pred.toFixed(2)} · actual r<sub>t</sub> ${wm.reward_real.toFixed(2)}`;
+  showRewardNum(wm);
 }
+const showRewardNum = (wm) => {
+  $("wm-num").innerHTML = `predicted r̂<sub>t</sub> ${wm.reward_pred.toFixed(2)} · actual r<sub>t</sub> ${wm.reward_real.toFixed(2)}`;
+};
 
 function drawSurprise() {
   const c = $("surprise-chart");
@@ -579,6 +584,7 @@ function onFrame(f) {
   // 서버는 base64 문자열, 브라우저 시뮬레이션은 바로 Uint8Array
   const rates = typeof f.rates === "string" ? Uint8Array.from(atob(f.rates), (c) => c.charCodeAt(0)) : f.rates;
   lastRates = rates;
+  lastFrame = f;
   lastObs = f.obs;
   lastStep = f.step;
   recentEye = [...recentEye, Math.max(...f.obs.slice(4))].slice(-10);
@@ -641,15 +647,37 @@ document.querySelectorAll("#mode button").forEach((b) => b.addEventListener("cli
   document.querySelectorAll("#mode button").forEach((x) => x.classList.toggle("on", x === b));
   send("mode", b.dataset.mode);
   $("hint").style.display = b.dataset.mode === "human" ? "block" : "none";
+  b.blur();      // 키보드 모드에서 Space(점프)가 이 버튼을 다시 누르지 않게
 }));
 let paused = false;
-$("pause").addEventListener("click", () => {
-  paused = !paused;
-  $("pause").textContent = paused ? "Play" : "Pause";
+// app.html은 아이콘 버튼(재생기 모양), legacy.html은 글자 버튼 · 속도 선택 상자
+function setPaused(v) {
+  paused = v;
+  const b = $("pause");
+  if (b.classList.contains("icon")) {
+    b.classList.toggle("paused", paused);
+    b.title = paused ? "Play" : "Pause";
+    b.setAttribute("aria-label", b.title);
+  } else b.textContent = paused ? "Play" : "Pause";
   send("pause", paused);
+}
+$("pause").addEventListener("click", () => {
+  setPaused(!paused);
+  $("pause").blur();      // 초점이 남으면 Space(점프)가 이 버튼을 누르게 됨
 });
-$("reset").addEventListener("click", () => send("reset"));
-$("speed").addEventListener("change", (e) => send("speed", e.target.value));
+$("reset").addEventListener("click", (e) => { send("reset"); e.currentTarget.blur(); });
+const SPEEDS = ["0.5", "1", "2", "4"];
+if ($("speed").tagName === "SELECT") $("speed").addEventListener("change", (e) => send("speed", e.target.value));
+else $("speed").addEventListener("click", (e) => {
+  const b = e.currentTarget, v = SPEEDS[(SPEEDS.indexOf(b.dataset.v) + 1) % SPEEDS.length];
+  const label = v === "0.5" ? "½×" : `${v}×`;
+  b.dataset.v = v;
+  b.querySelector(".v").textContent = label;
+  b.title = `Speed ${label} (click to change)`;
+  b.setAttribute("aria-label", `Speed ${label}`);
+  b.blur();
+  send("speed", v);
+});
 $("level").addEventListener("change", (e) => send("level", e.target.value));
 $("ghost")?.addEventListener("change", (e) => send("ghost", e.target.checked));
 
@@ -691,9 +719,21 @@ async function startLocal() {
   const msg = local.initMessage();
   onInit(msg);
   if (!msg.worldModel) $("wm-empty").textContent = "World model files not found (web/data/wm_*.onnx)";
+  // 멈춘 채로 시작: 첫 장면 하나를 그리고, 그 상태에서 시작하는 상상도 미리 채워 둔다 (▶를 누르면 진행)
+  setPaused(true);
   local.run(onFrame);
+  const first = await local.exclusive(() => local.step());
+  if (first) onFrame(first);
+  const p = msg.worldModel ? await local.preview() : null;
+  if (p) {
+    drawPreview(p);
+    if (first?.wm) showRewardNum(first.wm);     // 시작 화면은 미리보기가 아니라 첫 장면의 값
+    if (p.dreamFrame && lastFrame) explorerFrame({ ...lastFrame, dream: p.dreamFrame }, lastRates);
+  }
   status("");     // 로딩 문구만 쓰고, 실행 중에는 비움
 }
+
+setupLegend();
 
 if (document.body.dataset.source === "local") startLocal();
 else connect();
