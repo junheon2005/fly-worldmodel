@@ -21,6 +21,13 @@ const FRAME = "#7d8492", FRAME_W = 1.5;            // 행렬·벡터 테두리
 const NAME_SIZE = 13, OP_INK = "#2b303b";          // 위 이름 글자, 계산 기호 색
 const LIGHT = [250, 250, 251];
 const signedCol = (v) => shade(PAL.real, 0.5 + 0.46 * Math.max(-1, Math.min(1, v || 0)), LIGHT);   // −1 밝음 … +1 진함
+// 0~1 범위 값(확률, one-hot z, 게이트, 발화율)은 원래대로 0 = 옅은 회색 … 1 = 진함 (공통 눈금을 쓰면 0이 중간 회색이 돼 무늬가 안 보임)
+const unitCol = (v) => shade(PAL.real, 0.92 * Math.max(0, Math.min(1, v || 0)));
+// unifyGray: 뇌 칸은 눈금을 하나로 통일한다 (drawCompute · scaleInfo가 정함).
+//   회색은 0~1 값(발화율 ρ)도 −4 ~ 4 회색 눈금, 감각 색은 관측(o_t, c_t, s_t)도 입력(I_t, 입력 가중치)과 같은 0 ~ 4 눈금.
+//   행동 a_t만 −1 ~ 1 (tanh)
+let unifyGray = false;
+const isUnit = (it) => !unifyGray && (it.kind === "unit" || it.kind === "onehot");
 // 모든 칸이 같은 색 눈금을 쓴다 (같은 색 = 같은 값). 가중치는 ±0.1 안팎, 은닉값은 ±4 안팎이라
 // 0 근처는 촘촘하고 큰 값은 줄이는 symlog 눈금: f(v) = sign(v)·log(1 + |v|/C) / log(1 + S/C), |v| ≥ S는 끝 색.
 // 칸 오른쪽 아래 구석의 막대(scaleBarHTML)가 이 눈금을 보여 준다
@@ -28,35 +35,125 @@ export const SCALE = { S: 4, C: 0.05 };
 const LOG_S = Math.log1p(SCALE.S / SCALE.C);
 export const fScale = (v) => Math.max(-1, Math.min(1, Math.sign(v || 0) * Math.log1p(Math.abs(v || 0) / SCALE.C) / LOG_S));
 const valCol = (v) => signedCol(fScale(v));                                  // 회색: 음수 밝음 · 0 중간 · 양수 진함
-const hueCol = (c, v) => shade(c, Math.max(0, fScale(v)));                   // 감각 · 행동 색: 0 옅은 회색 → 클수록 그 색
-// 눈금 막대 (HTML): 회색 띠와 −4, −1, −0.1, 0, 0.1, 1, 4 눈금
-// 회색 막대(−4 ~ 4) 아래에, 이 단계에 감각 · 행동 색 칸이 있으면 그 색마다 막대를 하나씩(0 ~ 4, 회색 막대의 오른쪽 절반에 맞춤).
-// 색 칸의 값은 0 이상이라 오른쪽 절반만 쓰고, 눈금은 회색 막대와 같은 자리
-export function scaleBarHTML({ gray = true, colors = [] } = {}) {
-  const ticks = gray ? [-4, -1, -0.1, 0, 0.1, 1, 4] : [0, 0.1, 1, 4];
-  const lab = (v) => (v < 0 ? "−" : "") + Math.abs(v);
-  return (gray ? `<div class="bar" style="background:linear-gradient(90deg, ${signedCol(-1)}, ${signedCol(0)}, ${signedCol(1)})"></div>` : "") +
-    colors.map((c) => `<div class="bar hue" style="background:linear-gradient(90deg, ${shade(c, 0)}, ${shade(c, 1)})"></div>`).join("") +
-    `<div class="ticks">${ticks.map((v) => `<span style="left:${((fScale(v) + 1) / 2) * 100}%">${lab(v)}</span>`).join("")}</div>`;
-}
+const hueCol = (c, v) => shade(c, Math.max(0, fScale(v)));                   // 감각 색 입력(I_t, 입력 가중치): 0 옅은 회색 → 클수록 그 색
+// 관측(o_t, ô_t, c_t, s_t)은 0~1로 잘린 값이라 0~1 직선 (s_t가 1을 넘으면 가장 진한 색),
+// 행동 a_t는 tanh를 거친 −1~1이라 −1(옅음) … 0(중간) … 1(진함) 직선
+const obsCol = (c, v) => shade(c, Math.max(0, Math.min(1, v || 0)));
+const actCol = (c, v) => shade(c, (Math.max(-1, Math.min(1, v || 0)) + 1) / 2);
 const SENSE = (i) => (i < 2 ? PAL.food : i < 4 ? PAL.co2 : PAL.pred);
 const ACT = (i) => (i < 2 ? PAL.action : PAL.jump);
-// 한 단계의 그림에 회색 칸이 있는지, 어떤 색 칸이 있는지 (구석 눈금 막대에 넣을 것)
-export function scaleInfo(items) {
-  let gray = false;
-  const cols = new Map(), add = (c) => cols.set(c.join(","), c);
+// ---------- 칸 오른쪽 아래 구석 눈금 막대 (HTML): 대부분의 단계 ----------
+// 한 줄에 왼쪽 회색 막대(−4 ~ 4, 아래에 감각 · 행동 색 막대 0 ~ 4를 오른쪽 절반에 맞춰), 오른쪽 0~1 막대
+export function scaleBarHTML({ gray = true, hue = [], unit = false, obs = [], act = [] } = {}) {
+  const lab = (v) => (v < 0 ? "−" : "") + Math.abs(v);
+  const grad = (a, b) => `background:linear-gradient(90deg, ${a}, ${b})`;
+  const ticks = (vals, pos) => `<div class="ticks">${vals.map((v) => `<span style="left:${pos(v) * 100}%">${lab(v)}</span>`).join("")}</div>`;
+  const colorBars = (cs, cls) => cs.map((c) => `<div class="bar ${cls}" style="${grad(shade(c, 0), shade(c, 1))}"></div>`).join("");
+  let html = "";
+  // −4 ~ 4 (symlog): 가중치 · 은닉값 회색, 그 오른쪽 절반(0 ~ 4)에 감각 입력 색(I_t, 입력 가중치)
+  if (gray || hue.length) html += `<div class="main">${(gray ? `<div class="bar" style="background:linear-gradient(90deg, ${signedCol(-1)}, ${signedCol(0)}, ${signedCol(1)})"></div>` : "") +
+    colorBars(hue, "hue") + ticks(gray ? [-4, -1, -0.1, 0, 0.1, 1, 4] : [0, 0.1, 1, 4], (v) => (fScale(v) + 1) / 2)}</div>`;
+  // 0 ~ 1 직선: 확률 · z · 게이트 · 발화율(회색), 관측 o_t · c_t · s_t(감각 색)
+  if (unit || obs.length) html += `<div class="lin">${(unit ? `<div class="bar" style="${grad(unitCol(0), unitCol(1))}"></div>` : "") + colorBars(obs, "sub") + ticks([0, 1], (v) => v)}</div>`;
+  // −1 ~ 1 직선: 행동 a_t (tanh)
+  if (act.length) html += `<div class="lin">${colorBars(act, "sub") + ticks([-1, 0, 1], (v) => (v + 1) / 2)}</div>`;
+  return html;
+}
+// 한 단계의 그림에 어떤 눈금의 칸들이 있는지
+export function scaleInfo(items, opt = {}) {
+  unifyGray = !!opt.unifyGray;
+  const info = { gray: false, unit: false, hue: new Map(), obs: new Map(), act: new Map() };
   for (const it of items || []) {
-    if (it.t === "vec") {
-      if (it.hue) for (let i = 0; i < it.v.length; i++) add(it.hue(i));
-      else if (it.kind === "obs") [PAL.food, PAL.co2, PAL.pred].forEach(add);
-      else if (it.kind === "act") [PAL.action, PAL.jump].forEach(add);
-      else gray = true;
-    } else if (it.t === "mat" && !it.m.img) {
-      if (it.m.hue) for (let j = 0; j < it.m.cols; j++) add(it.m.hue(0, j));
-      else gray = true;
-    } else if (it.t === "grid") gray = true;
+    const k = legendKind(it);
+    if (!k) continue;
+    if (k[0] === "gray" || k[0] === "unit") info[k[0]] = true;
+    else for (const c of k[1]) info[k[0]].set(c.join(","), c);
   }
-  return { gray, colors: [...cols.values()] };
+  return { gray: info.gray, unit: info.unit, hue: [...info.hue.values()], obs: [...info.obs.values()], act: [...info.act.values()] };
+}
+
+// ---------- 색 막대: 같은 눈금을 쓰는 상자끼리 묶어, 그 상자들 바로 아래 가운데에 하나씩 (spec.legend, 지금은 Prior · Posterior) ----------
+//   gray : 부호 있는 값(가중치 · 은닉값), −4 ~ 4 symlog          눈금 −4 −1 −0.1 0 0.1 1 4
+//   hue  : 감각 · 행동 색 값, 0 ~ 4 (색마다 한 줄)                 눈금 0 0.1 1 4
+//   unit : 0~1 값(확률, z, 게이트, 발화율), 0 ~ 1 직선           양 끝 0, 1
+const LEG_W = { gray: 176, hue: 96, unit: 64, obs: 72, act: 72 }, LEG_FONT = 9.5;
+function legendKind(it) {
+  if (it.t === "vec") {
+    if (it.hue) { const cs = []; for (let i = 0; i < it.v.length; i++) cs.push(it.hue(i)); return ["hue", cs]; }
+    if (it.kind === "obs") return [unifyGray ? "hue" : "obs", [PAL.food, PAL.co2, PAL.pred]];
+    if (it.kind === "act") return ["act", [PAL.action, PAL.jump]];
+    return [isUnit(it) ? "unit" : "gray"];
+  }
+  if (it.t === "mat" && !it.m.img) {
+    if (!it.m.hue) return ["gray"];
+    const cs = [];
+    for (let j = 0; j < it.m.cols; j++) cs.push(it.m.hue(0, j));
+    return ["hue", cs];
+  }
+  if (it.t === "grid") return [it.kind === "signed" ? "gray" : "unit"];
+  return null;
+}
+// 상자 목록 → 막대 묶음 [{ key, items(인덱스), colors }]
+function legendGroups(items) {
+  const g = new Map();
+  items.forEach((it, i) => {
+    const k = legendKind(it);
+    if (!k) return;
+    if (!g.has(k[0])) g.set(k[0], { key: k[0], idx: [], colors: new Map() });
+    const e = g.get(k[0]);
+    e.idx.push(i);
+    for (const c of k[1] || []) e.colors.set(c.join(","), c);
+  });
+  return [...g.values()];
+}
+const legendH = (e) => (e.key === "hue" || e.key === "obs" || e.key === "act" ? 5 * e.colors.size + 14 : e.key === "gray" ? 20 : 10);
+// 막대 하나 (x0: 왼쪽 끝, y0: 위, w: 막대 폭)
+function drawLegend(ctx, e, x0, y0, w) {
+  const grad = (cols) => {
+    const g = ctx.createLinearGradient(x0, 0, x0 + w, 0);
+    cols.forEach((c, i) => g.addColorStop(i / (cols.length - 1), c));
+    return g;
+  };
+  const lab = (v) => (v < 0 ? "−" : "") + Math.abs(v);
+  ctx.font = `${LEG_FONT}px Segoe UI`; ctx.lineWidth = 0.8;
+  const ticks = (vals, pos, y) => {
+    ctx.fillStyle = SUB; ctx.textAlign = "center";
+    for (const v of vals) {
+      const x = x0 + pos(v) * w;
+      ctx.fillRect(x - 0.4, y, 0.8, 3);
+      ctx.fillText(lab(v), x, y + 12);
+    }
+  };
+  if (e.key === "gray") {
+    ctx.fillStyle = grad([signedCol(-1), signedCol(0), signedCol(1)]); ctx.fillRect(x0, y0, w, 6);
+    ctx.strokeStyle = "#b8bec9"; ctx.strokeRect(x0, y0, w, 6);
+    ticks([-4, -1, -0.1, 0, 0.1, 1, 4], (v) => (fScale(v) + 1) / 2, y0 + 6);
+  } else if (e.key === "hue" || e.key === "obs" || e.key === "act") {
+    const cs = [...e.colors.values()];
+    cs.forEach((c, i) => { ctx.fillStyle = grad([shade(c, 0), shade(c, 1)]); ctx.fillRect(x0, y0 + i * 5, w, 4); });
+    ctx.strokeStyle = "#b8bec9"; ctx.strokeRect(x0, y0, w, 5 * cs.length - 1);
+    const [vals, pos] = e.key === "hue" ? [[0, 0.1, 1, 4], fScale] : e.key === "obs" ? [[0, 1], (v) => v] : [[-1, 0, 1], (v) => (v + 1) / 2];
+    ticks(vals, pos, y0 + 5 * cs.length - 1);
+  } else {
+    ctx.fillStyle = SUB; ctx.textAlign = "right"; ctx.fillText("0", x0 - 4, y0 + 6.5);
+    ctx.textAlign = "left"; ctx.fillText("1", x0 + w + 4, y0 + 6.5);
+    ctx.fillStyle = grad([unitCol(0), unitCol(1)]); ctx.fillRect(x0, y0, w, 6);
+    ctx.strokeStyle = "#b8bec9"; ctx.strokeRect(x0, y0, w, 6);
+  }
+}
+// 막대들을 자기 상자들 가운데 아래에 놓고, 겹치면 옆으로 민다
+function drawLegends(ctx, groups, placed, y0, Wl) {
+  const pad = (e) => (e.key === "unit" ? 12 : 10);            // 막대 양옆 글자 자리
+  const bs = groups.map((e) => {
+    const ps = e.idx.map((i) => placed[i]), l = Math.min(...ps.map((p) => p.x)), r = Math.max(...ps.map((p) => p.x + p.w));
+    const w = LEG_W[e.key];
+    return { e, w, x: (l + r) / 2 - w / 2 };
+  }).sort((a, b) => a.x - b.x);
+  for (let i = 1; i < bs.length; i++) bs[i].x = Math.max(bs[i].x, bs[i - 1].x + bs[i - 1].w + pad(bs[i - 1].e) + pad(bs[i].e) + 8);
+  const over = bs.length ? bs.at(-1).x + bs.at(-1).w + pad(bs.at(-1).e) - (Wl - 4) : 0;
+  if (over > 0) for (const b of bs) b.x -= over;
+  if (bs.length && bs[0].x - pad(bs[0].e) < 4) { const d = 4 + pad(bs[0].e) - bs[0].x; for (const b of bs) b.x += d; }
+  for (const b of bs) drawLegend(ctx, b.e, b.x, y0, b.w);
 }
 
 // ---------- 글자: h_t, W^{(1)}, h_{t−1} 같은 아래·위 첨자 ----------
@@ -79,22 +176,42 @@ export function parse(s) {
   }
   return out;
 }
+// 위첨자 바로 뒤에 아래첨자가 오면(또는 그 반대) 같은 자리에 위아래로 쌓는다 (W^d_1 → 수식 줄의 KaTeX와 같은 모양).
+// 쌓인 두 글자는 넓은 쪽 폭만큼만 자리를 차지한다
+export function runs(s) {
+  const ps = parse(s), out = [];
+  for (let i = 0; i < ps.length; i++) {
+    const p = ps[i], q = ps[i + 1];
+    if (p.mode !== "base" && q && q.mode !== "base" && q.mode !== p.mode) { out.push([p, q]); i++; }
+    else out.push([p]);
+  }
+  return out;
+}
+const SUB_DY = 0.24, SUP_DY = 0.42;   // 첨자 높이 (글자 크기에 대한 비율): 아래첨자는 조금만 내려 이름 아래로 덜 튀어나오게
 function measure(ctx, s, size, weight = "") {
   let w = 0;
-  for (const p of parse(s)) { ctx.font = `${weight ? weight + " " : ""}${p.mode === "base" ? size : size * 0.72}px Segoe UI`; w += ctx.measureText(p.t).width; }
+  for (const run of runs(s)) {
+    let rw = 0;
+    for (const p of run) { ctx.font = `${weight ? weight + " " : ""}${p.mode === "base" ? size : size * 0.72}px Segoe UI`; rw = Math.max(rw, ctx.measureText(p.t).width); }
+    w += rw;
+  }
   return w;
 }
 // 수식 글자 (가운데 정렬)
 export function label(ctx, x, y, s, { size = 11.5, color = INK, align = "center", italic = false, weight = "" } = {}) {
-  const w = measure(ctx, s, size);
+  const w = measure(ctx, s, size, weight);
   let cx = align === "center" ? x - w / 2 : align === "right" ? x - w : x;
   ctx.fillStyle = color;
   ctx.textAlign = "left";
-  for (const p of parse(s)) {
-    const sz = p.mode === "base" ? size : size * 0.72;
-    ctx.font = `${weight ? weight + " " : ""}${italic && p.mode === "base" ? "italic " : ""}${sz}px Segoe UI`;
-    ctx.fillText(p.t, cx, y + (p.mode === "sub" ? size * 0.28 : p.mode === "sup" ? -size * 0.4 : 0));
-    cx += ctx.measureText(p.t).width;
+  for (const run of runs(s)) {
+    let rw = 0;
+    for (const p of run) {
+      const sz = p.mode === "base" ? size : size * 0.72;
+      ctx.font = `${weight ? weight + " " : ""}${italic && p.mode === "base" ? "italic " : ""}${sz}px Segoe UI`;
+      ctx.fillText(p.t, cx, y + (p.mode === "sub" ? size * SUB_DY : p.mode === "sup" ? -size * SUP_DY : 0));
+      rw = Math.max(rw, ctx.measureText(p.t).width);
+    }
+    cx += rw;
   }
   return w;
 }
@@ -183,7 +300,9 @@ function dimsOf(it) {
 export function drawCompute(cv, spec, maxH) {
   const dpr = window.devicePixelRatio || 1;
   const W = Math.max(280, cv.clientWidth || cv.parentElement.clientWidth || 600);
-  const Hm0 = Math.max(40, Math.min(190, maxH - 40));   // 40 = 위아래 글자 자리 (아래 H 참고)
+  unifyGray = !!spec.unifyGray;
+  const groups = spec.legend ? legendGroups(spec.items) : [], LEG = groups.length ? Math.max(...groups.map(legendH)) + 6 : 0;   // 그림 안 색 막대 줄 높이
+  const Hm0 = Math.max(40, Math.min(190, maxH - 43 - LEG));   // 43 = 위아래 글자 자리, LEG = 색 막대 (아래 H 참고)
   // 폭이 넘치면 높이(=크기)를 줄인다. 이름·순서쌍·칸 상자 폭은 높이와 상관없이 고정이라 이분 탐색으로 맞는 높이를 찾는다
   const fit = (opt) => {
     const room = W - 14;   // 양옆 7px 여유
@@ -208,8 +327,8 @@ export function drawCompute(cv, spec, maxH) {
     s = Math.min(1, (W - 14) / L.total);
     best = { Hm: Hb, L, opt };
   }
-  // 캔버스 높이는 실제 그림 높이(가장 큰 상자)에 맞춘다. 위 22: 굵은 이름(위첨자 포함), 아래 18: 차원 순서쌍
-  const L = best.L, Hc = Math.max(26, ...L.boxes.map((b) => b.h)), H = Hc + 40, top = 22, mid = top + Hc / 2;
+  // 캔버스 높이는 실제 그림 높이(가장 큰 상자)에 맞춘다. 위 25: 굵은 이름(위·아래첨자 포함, 상자와 9 띄움), 아래 18: 차원 순서쌍
+  const L = best.L, Hc = Math.max(26, ...L.boxes.map((b) => b.h)), H = Hc + 43 + LEG, top = 25, mid = top + Hc / 2;
   // 자리가 남으면(가로·세로 모두) 그림 전체를 비율로 키운다. 최대 1.5배
   if (s === 1) s = Math.max(1, Math.min(1.5, (W - 14) / L.total, maxH / H));   // 양옆 7px 여유 (두꺼운 테두리가 끝에 닿지 않게)
   const Wl = W / s;   // Wl: 비율로 그릴 때의 논리 폭
@@ -248,10 +367,11 @@ export function drawCompute(cv, spec, maxH) {
       ctx.strokeStyle = FRAME; ctx.lineWidth = FRAME_W; ctx.strokeRect(bx + 0.5, by + 0.5, b.w - 1, b.h - 1);
       ctx.fillStyle = INK; ctx.font = "600 13px Segoe UI"; ctx.textAlign = "center"; ctx.fillText(it.text, bx + b.w / 2, mid + 4.5);
     }
-    if (it.label) label(ctx, bx + b.w / 2, by - 6, it.label, { size: NAME_SIZE, weight: "600" });
+    if (it.label) label(ctx, bx + b.w / 2, by - 9, it.label, { size: NAME_SIZE, weight: "600" });
     drawDims(ctx, p, b.dims);
     x += b.slot + 6;
   });
+  if (groups.length) drawLegends(ctx, groups, placed, top + Hc + 21, Wl);
   cv._placed = placed;
   cv._scale = s;
   cv._spec = spec;
@@ -271,12 +391,14 @@ function drawOp(ctx, s, cx, cy) {
 // 칸 색 (공통 눈금): 감각 · 행동 값은 그 색의 진하기, 나머지는 회색
 function cellColor(it, i, v) {
   if (it.hue) return hueCol(it.hue(i), v);
-  if (it.kind === "obs") return hueCol(SENSE(i), v);
-  if (it.kind === "act") return hueCol(ACT(i), Math.abs(v));
+  if (it.kind === "obs") return unifyGray ? hueCol(SENSE(i), v) : obsCol(SENSE(i), v);
+  if (it.kind === "act") return actCol(ACT(i), v);
+  if (isUnit(it)) return unitCol(v);
   return valCol(v);
 }
 // 칸 안 숫자 글자색: 바탕이 진하면 흰 글자
-const darkCell = (it, v) => (it.t !== "mat" && (it.hue || it.kind === "obs" || it.kind === "act") ? fScale(Math.abs(v)) > 0.6 : fScale(v) > 0.25);
+const darkCell = (it, v) => (it.t === "mat" ? fScale(v) > 0.25 : isUnit(it) || (it.kind === "obs" && !unifyGray) ? v > 0.6
+  : it.kind === "act" ? v > 0.25 : it.hue || it.kind === "obs" ? fScale(Math.abs(v)) > 0.6 : fScale(v) > 0.25);
 // cells가 있을 때 칸마다 [위, 아래] (벡터 위쪽 기준). 큰 칸은 작은 칸의 4배, 단 글자가 들어가게 최소 MIN_BIG
 const GAP = 5, MIN_BIG = 12;
 function cellRows(n, h, cells) {
@@ -429,7 +551,7 @@ function drawSegs(ctx, p) {
 function drawGrid(ctx, p, hv) {
   const { it, x, y, w } = p, v = it.v, c = w / 16;
   for (let i = 0; i < 256; i++) {
-    ctx.fillStyle = valCol(v[i] || 0);
+    ctx.fillStyle = isUnit(it) ? unitCol(v[i]) : valCol(v[i] || 0);
     ctx.fillRect(x + (i % 16) * c, y + Math.floor(i / 16) * c, c - 0.5, c - 0.5);
   }
   ctx.strokeStyle = FRAME; ctx.lineWidth = FRAME_W; ctx.strokeRect(x - 0.5, y - 0.5, w + 1, w + 1);

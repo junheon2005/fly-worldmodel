@@ -62,14 +62,11 @@
       <!-- 맨 뒤 색 띠: 왼쪽 그림의 틀과 오른쪽 상세 칸을 이어 칠함 (위 보라 = 월드모델, 아래 청록 = 뇌, explorer.js drawBands) -->
       <svg id="band-svg" class="bands" aria-hidden="true"></svg>
       <!-- 왼쪽 세로 한 칸: 월드모델과 뇌의 층 구조를 하나의 그림으로 (둘 사이 화살표가 끊기지 않게) -->
-      <div class="flow"><svg id="flow-svg" viewBox="0 0 370 460" role="img" aria-label="World model and fly brain layers with the senses and actions they exchange"></svg></div>
+      <div class="flow"><svg id="flow-svg" viewBox="0 0 370 476" role="img" aria-label="World model and fly brain layers with the senses and actions they exchange"></svg></div>
 
       <!-- 오른쪽 위: 월드모델 상세 화면 -->
       <section class="panel half wm">
-        <!-- 제목 없음: 칸 색(보라)과 왼쪽 틀이 월드모델임을 알려 줌. 보상 예측 값만 오른쪽 위에 -->
-        <div class="panel-head num-only">
-          <span class="muted" id="wm-num"></span>
-        </div>
+        <!-- 제목 없음: 칸 색(보라)과 왼쪽 틀이 월드모델임을 알려 줌 -->
           <div class="detail" id="wm-detail">
             <div class="view" id="wmv-statemap">
               <h3>State map <span class="muted">· model state (h<sub>t</sub>, z<sub>t</sub>), 512-d, reduced to 2-D by PCA</span></h3>
@@ -80,11 +77,20 @@
               </div>
             </div>
             <div class="view" id="wmv-layer" hidden>
-              <div id="wml-head"></div>
+              <!-- 제목 줄. Reward head일 때만 오른쪽 위에 예측 · 실제 보상 문구, 누르면 그 아래에 그래프 창 (explorer.js) -->
+              <div class="xd-toprow" id="wml-top">
+                <div id="wml-head"></div>
+                <button class="xd-rnum" id="wml-rnum" hidden aria-expanded="false" aria-controls="wml-inset" title="Show predicted and actual reward over time"></button>
+                <div class="xd-inset" id="wml-inset" role="dialog" aria-label="Predicted and actual reward over time" hidden>
+                  <div class="xd-inset-title" id="wml-inset-title"></div>
+                  <canvas id="wml-inset-cv"></canvas>
+                </div>
+              </div>
               <div id="wml-steps" class="xd-steps"></div>
               <!-- 수식 + 계산 그림: 단계를 넘길 때 옆으로 밀리는 부분 -->
               <div class="xd-slide" id="wml-slide">
                 <div id="wml-tex" class="xd-tex"></div>
+                <div class="xd-sec" id="wml-sec"></div>
                 <canvas id="wml-canvas"></canvas>
               </div>
             </div>
@@ -92,7 +98,7 @@
       <!-- 이전 · 다음 단계 (칸 가운데 양옆) -->
       <button class="side-nav prev" data-panel="wm" data-nav="-1" title="Previous step" aria-label="Previous step" hidden><svg viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>
       <button class="side-nav next" data-panel="wm" data-nav="1" title="Next step" aria-label="Next step" hidden><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button>
-      <!-- 공통 색 눈금 (compute_view.js scaleBarHTML): 이 칸의 모든 계산 그림이 같은 눈금 -->
+      <!-- 구석 색 눈금 (compute_view.js scaleBarHTML). Prior · Posterior는 계산 그림 안에 그리므로 숨김 -->
       <div class="xd-scale" aria-hidden="true"></div>
       </section>
 
@@ -113,6 +119,7 @@
               <div id="brl-steps" class="xd-steps"></div>
               <div class="xd-slide" id="brl-slide">
               <div id="brl-tex" class="xd-tex"></div>
+              <div class="xd-sec" id="brl-sec"></div>
               <div class="xd-row">
                 <!-- Sensory → Adaptation 왼쪽: 지금 뇌가 받는 관측을 막대로 (explorer.js) -->
                 <div id="brl-sense" class="xd-side" hidden>
@@ -132,7 +139,7 @@
       <!-- 이전 · 다음 단계 (칸 가운데 양옆) -->
       <button class="side-nav prev" data-panel="br" data-nav="-1" title="Previous step" aria-label="Previous step" hidden><svg viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg></button>
       <button class="side-nav next" data-panel="br" data-nav="1" title="Next step" aria-label="Next step" hidden><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></button>
-      <!-- 공통 색 눈금 (compute_view.js scaleBarHTML): 이 칸의 모든 계산 그림이 같은 눈금 -->
+      <!-- 구석 색 눈금 (compute_view.js scaleBarHTML). Prior · Posterior는 계산 그림 안에 그리므로 숨김 -->
       <div class="xd-scale" aria-hidden="true"></div>
       </section>
     </div>

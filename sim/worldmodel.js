@@ -21,7 +21,9 @@ export class WorldModel {
     Object.assign(this, { meta, obsStep, imgStep, heads });
     this.G = meta.groups;
     this.C = meta.classes;
-    this.sample = false;          // true면 z를 확률대로 뽑고, false면 가장 확률 높은 칸
+    // true(기본): z를 그룹마다 확률대로 뽑는다 (학습 · DreamerV3 논문과 같음).
+    // false: 가장 확률 높은 칸 (파이썬 기준값과 숫자를 맞춰 보는 test_wm.html에서만 씀)
+    this.sample = true;
     this.pins = new Map();        // 사용자가 고정한 믿음: 범주 g → 칸 c (실제 갱신·상상 모두에 적용)
     this.reset();
   }

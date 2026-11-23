@@ -83,7 +83,8 @@ export class FlyBrain {
       for (let j = 0; j < this.obsDim; j++) d += sensed[j] * this.in_w[row + j];
       ext[this.in_neurons[k]] = d;
     }
-    // 3) 뉴런 동역학
+    // 3) 뉴런 동역학. 하위 단계(substep)마다 막전위를 복사해 둔다 (계산 화면이 Middle의 하위 단계를 보여 줄 때 씀)
+    this.vSub = [];
     for (let s = 0; s < this.substeps; s++) {
       for (let i = 0; i < n; i++) rate[i] = v[i] > 0 ? Math.tanh(v[i]) : 0;
       for (let i = 0; i < n; i++) {
@@ -92,6 +93,7 @@ export class FlyBrain {
         v[i] += alpha[i] * (-v[i] + syn + ext[i] + bias[i]);
         if (clamp[i] === clamp[i]) v[i] = clamp[i];   // NaN이 아니면 강제값
       }
+      this.vSub.push(v.slice());
     }
     for (let i = 0; i < n; i++) rate[i] = v[i] > 0 ? Math.tanh(v[i]) : 0;
     // 4) 하행뉴런 → 행동
@@ -119,12 +121,11 @@ export class FlyBrain {
   }
 }
 
-// 계산 화면용 뇌 입출력: 한 스텝 전(적응 기준 c, 발화율 ρ)과 후(감각 s, 감각뉴런 입력 I, 행동 출력 y)
+// 계산 화면용 뇌 입출력: 한 스텝 전(적응 기준 c, 막전위 vPrev)과 후(감각 s, 감각뉴런 입력 I,
+// 하위 단계마다의 막전위 vSub, 행동 출력 y). Middle의 하위 단계 화면은 vPrev · vSub로 그린다 (explorer.js brainSubsteps)
 export function brainInputs(brain) {
-  const r = new Uint8Array(brain.n);
-  for (let i = 0; i < brain.n; i++) { const v = brain.v[i]; r[i] = v > 0 ? Math.min(255, Math.tanh(v) * 255) : 0; }
-  return { c: brain.adapted.slice(), rPrev: r };
+  return { c: brain.adapted.slice(), vPrev: brain.v.slice() };
 }
 export function brainOutputs(brain, before) {
-  return { ...before, s: brain.sensed.slice(), I: Float32Array.from(brain.in_neurons, (i) => brain.ext[i]), y: brain.out.slice() };
+  return { ...before, s: brain.sensed.slice(), I: Float32Array.from(brain.in_neurons, (i) => brain.ext[i]), vSub: brain.vSub, y: brain.out.slice() };
 }

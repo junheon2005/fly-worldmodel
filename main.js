@@ -406,7 +406,7 @@ function drawPreview(p) {
   if (rawOpen()) drawZ(p.z_probs, p.z_shape);
   drawPred(p.imagined);
   if (wmMap) drawStateMap(project(p.h, p.z), p.imagined);
-  $("wm-num").innerHTML = `r̂<sub>t</sub> ${p.reward_pred.toFixed(2)} (preview)`;
+  if ($("wm-num")) $("wm-num").innerHTML = `r̂<sub>t</sub> ${p.reward_pred.toFixed(2)} (preview)`;
   if (viewMode !== "live" && lastRates) brain.update(p.dream.rates);
   updatePinInfo();
 }
@@ -455,7 +455,8 @@ function drawWM(wm) {
   showRewardNum(wm);
 }
 const showRewardNum = (wm) => {
-  $("wm-num").innerHTML = `predicted r̂<sub>t</sub> ${wm.reward_pred.toFixed(2)} · actual r<sub>t</sub> ${wm.reward_real.toFixed(2)}`;
+  // app.html은 Reward head 화면 오른쪽 위 그래프 창(explorer.js)에 보이고, 이 글자 줄은 legacy.html에만 있다
+  if ($("wm-num")) $("wm-num").innerHTML = `predicted r̂<sub>t</sub> ${wm.reward_pred.toFixed(2)} · actual r<sub>t</sub> ${wm.reward_real.toFixed(2)}`;
 };
 
 function drawSurprise() {
